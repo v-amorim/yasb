@@ -39,12 +39,9 @@ def centred_under(popup: QWidget, frame: QWidget) -> QPoint:
     return QPoint(x, y)
 
 
-def thread_start(item: QWidget, frame: QWidget, anchor: QWidget | None = None) -> QPoint:
-    """Where the thread leaves the bar: under the item when it sits on a stacked bar's bottom row, else the bar's edge.
-
-    anchor is the part of the item the popup opens from, when the item holds more than that part.
-    """
-    element = anchor or getattr(item, "_widget_container", None) or item
+def thread_start(item: QWidget, frame: QWidget) -> QPoint:
+    """Where the thread leaves the bar: under the item when it sits on a stacked bar's bottom row, else the bar's edge."""
+    element = getattr(item, "_widget_container", None) or item
     center = element.mapToGlobal(QPoint(element.width() // 2, element.height()))
     bar = frame.window()
     on_bottom_row = getattr(bar, "is_stacked", False) and getattr(item, "parent_layout_type", "") in ("left", "right")
@@ -101,12 +98,9 @@ class Floating:
 
     _open: Floating | None = None
 
-    def __init__(
-        self, popup: QWidget, item: QWidget, frame_of: Callable[[], QWidget | None], anchor: QWidget | None = None
-    ) -> None:
+    def __init__(self, popup: QWidget, item: QWidget, frame_of: Callable[[], QWidget | None]) -> None:
         self._popup = popup
         self._item = item
-        self._anchor = anchor
         self._frame_of = frame_of
         self.thread = PopupThread()
         self._drop = QPropertyAnimation(popup, b"pos")
@@ -131,7 +125,7 @@ class Floating:
             self._drop.setEndValue(target)
         else:
             self._popup.move(target)
-        self.thread.follow(thread_start(self._item, frame, self._anchor), QRect(target, self._popup.size()))
+        self.thread.follow(thread_start(self._item, frame), QRect(target, self._popup.size()))
 
     def drop_in(self) -> None:
         """Start the open motion: the card drops DROP px into place while it fades in."""
@@ -151,13 +145,13 @@ class Floating:
         if not animations_enabled():
             self._popup.move(target)
             self.thread.setWindowOpacity(1.0)
-            self.thread.follow(thread_start(self._item, frame, self._anchor), QRect(target, self._popup.size()))
+            self.thread.follow(thread_start(self._item, frame), QRect(target, self._popup.size()))
             return
         self._drop.setStartValue(target - QPoint(0, DROP))
         self._drop.setEndValue(target)
         self._popup.move(target - QPoint(0, DROP))
         self._drop.start()
-        self.thread.follow(thread_start(self._item, frame, self._anchor), QRect(target, self._popup.size()))
+        self.thread.follow(thread_start(self._item, frame), QRect(target, self._popup.size()))
 
     def fade(self, opacity: float) -> None:
         self.thread.setWindowOpacity(opacity)

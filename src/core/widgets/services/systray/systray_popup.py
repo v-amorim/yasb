@@ -71,11 +71,7 @@ class SystrayPopup(QWidget):
         self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
         self._fade_base_ms = 80
         self._fade_animation.finished.connect(self._on_animation_finished)
-        self._floating = (
-            Floating(self, parent, self._bar_frame, anchor=toggle_btn)
-            if self._bar_anchored and parent is not None
-            else None
-        )
+        self._floating = Floating(self, parent, self._bar_frame) if self._bar_anchored and parent is not None else None
         if self._floating is not None:
             self._fade_animation.valueChanged.connect(lambda value: self._floating and self._floating.fade(value))
 

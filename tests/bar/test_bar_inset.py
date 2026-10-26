@@ -158,7 +158,7 @@ def test_gap_step_bar_clock_row_to_pill_row(bar: Bar):
 
 
 PILL_RADIUS = 8
-BAR_RADIUS = 20
+BAR_RADIUS = 12
 
 
 def _corner_alpha(widget: QWidget, flags: QWidget.RenderFlag) -> tuple[bytes, int, int]:
@@ -254,5 +254,5 @@ def _is_date(container: QWidget) -> bool:
     return parent is not None and "date-pill" in str(parent.property("class"))
 
 
-def test_pill_corner_bar_bottom_corners_are_20(bar: Bar):
+def test_pill_corner_bar_bottom_corners_are_12(bar: Bar):
     _assert_radius(bar.bar_frame, BAR_RADIUS, BAR_RADIUS + 4, bottom_only=True)

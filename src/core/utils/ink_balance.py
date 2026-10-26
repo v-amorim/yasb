@@ -101,6 +101,11 @@ class _InkBalance(QObject):
         self._frame = frame
         self.mode = OFF
         self._applying = False
+        # Net margins already tried for this mode, text and width, with how far off each one measured
+        self._key: tuple[str, tuple[str, ...], int] | None = None
+        self._tried: dict[int, float] = {}
+        # Set once a step would revisit a tried margin, so the frame holds still until the key changes
+        self._held = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(0)
@@ -162,10 +167,22 @@ class _InkBalance(QObject):
                 return
             left, right, centre = ink
             delta = balance_delta(self.mode, width=frame.width(), left=left, right=right, centre=centre)
+            # A frame that fits its content changes width with every margin, so only a fixed width keeps its memory
+            key = (self.mode, tuple(label.text() for label in labels), frame.width())
+            if key != self._key:
+                self._key, self._tried, self._held = key, {}, False
+            margins = layout.contentsMargins()
+            current = margins.left() - margins.right()
+            self._tried[current] = abs(delta)
             step = math.floor(delta + 0.5)
-            if step:
-                margins = layout.contentsMargins()
-                self._set_margins(margins.left() - margins.right() + step)
+            if self._held or not step:
+                return
+            # A fixed-width slot moves centred content half a pixel per margin pixel, so a step can overshoot both ways
+            if current + step in self._tried:
+                self._set_margins(min(self._tried, key=self._tried.__getitem__))
+                self._held = True
+                return
+            self._set_margins(current + step)
         finally:
             self._applying = False
 

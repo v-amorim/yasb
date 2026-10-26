@@ -142,6 +142,30 @@ def test_ink_balance_recompute_follows_text_and_font_size(pill: PillBuilder, she
     assert abs(left - right) <= TOLERANCE, ("after font", left, right)
 
 
+@pytest.mark.parametrize("width", [None, 32, 33])
+@pytest.mark.parametrize("mode", [MASS, EDGES])
+@pytest.mark.parametrize("icon", ["\U000f00de", "\U000f057e", ICONS["sunny"]])
+def test_ink_balance_settles_and_holds_still(pill: PillBuilder, mode: str, icon: str, width: int | None):
+    # In a fixed-width slot a margin pixel moves centred content half a pixel, which made the correction flip forever.
+    _, container = pill(mode, icon, "")
+    if width is not None:
+        container.setFixedWidth(width)
+    layout = container.layout()
+    assert layout is not None
+    _wait(300)
+    seen = set()
+    for turn in range(20):
+        container.setProperty("hovered", turn % 2 == 0)
+        style = container.style()
+        assert style is not None
+        style.unpolish(container)
+        style.polish(container)
+        _wait(30)
+        margins = layout.contentsMargins()
+        seen.add((margins.left(), margins.right()))
+    assert len(seen) == 1, seen
+
+
 def test_ink_balance_recompute_follows_a_mode_switch(pill: PillBuilder):
     _, container = pill(EDGES, ICONS["clear-night"], LABELS["negative"])
     container.setProperty("inkbalance", MASS)

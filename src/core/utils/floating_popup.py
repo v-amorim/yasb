@@ -86,6 +86,8 @@ class PopupThread(QWidget):
             return
         self.setGeometry(start.x() - THREAD_WIDTH // 2, start.y(), THREAD_WIDTH, end_y - start.y())
         self.show()
+        # The bar is topmost too and comes to the front on a click, which hid the thread's top part behind it
+        self.raise_()
 
     def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)

@@ -9,6 +9,7 @@ from PyQt6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt
 from PyQt6.QtGui import QMouseEvent, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget
 
+from core.ui.components.fill_slider import FillSlider
 from core.utils.icons.service import IconService, ProcessIcon
 from core.utils.qobject import is_valid_qobject
 from core.utils.tooltip import CustomToolTip, set_tooltip
@@ -185,15 +186,27 @@ class VolumeWidget(BaseWidget):
     def _update_app_mute_state(self, icon_label: QLabel, slider: QSlider, is_muted: bool, pid: int) -> None:
         """Update the visual state of an app's icon and slider based on mute status"""
         try:
-            # Get the original icon
-            app_icon = self._get_process_icon_pixmap(pid, icon_size=16, force_grayscale=is_muted)
+            # System sounds (pid 0) has no process icon; its glyph grays through the muted class
+            app_icon = self._get_process_icon_pixmap(pid, icon_size=16, force_grayscale=is_muted) if pid else None
             if app_icon:
                 icon_label.setPixmap(app_icon)
 
-            # Enable/disable the slider
-            slider.setEnabled(not is_muted)
+            if isinstance(slider, FillSlider):
+                # A disabled row would not take the right-click that unmutes it
+                self._set_row_muted(slider, is_muted)
+            else:
+                slider.setEnabled(not is_muted)
         except Exception as e:
             logging.error("Failed to update app mute state: %s", e)
+
+    def _set_row_muted(self, row: FillSlider, muted: bool) -> None:
+        classes = [name for name in str(row.property("class") or "").split() if name != "muted"]
+        row.setProperty("class", " ".join([*classes, "muted"] if muted else classes))
+        refresh_widget_style(row, *row.findChildren(QLabel))
+
+    @staticmethod
+    def _is_row_muted(slider: QSlider) -> bool:
+        return not slider.isEnabled() or "muted" in str(slider.property("class") or "").split()
 
     def _toggle_app_volumes(self):
         """Toggle the visibility of application volume sliders with animation"""
@@ -265,6 +278,16 @@ class VolumeWidget(BaseWidget):
                 self.volume_slider.setValue(current_volume)
             except:
                 pass
+        self._sync_master_mute()
+
+    def _sync_master_mute(self) -> None:
+        slider = self.volume_slider
+        if self.volume is None or not isinstance(slider, FillSlider) or not is_valid_qobject(slider):
+            return
+        try:
+            self._set_row_muted(slider, bool(self.volume.GetMute()))
+        except Exception as e:
+            logging.debug("Failed to read mute state: %s", e)
 
     def _apply_slider_scroll_step(self, slider: QSlider):
         """Apply scroll_step to slider wheel/keyboard increments."""
@@ -298,8 +321,7 @@ class VolumeWidget(BaseWidget):
             for icon_label, slider in rows:
                 if not is_valid_qobject(icon_label) or not is_valid_qobject(slider):
                     continue
-                # A disabled slider means the app is muted
-                pixmap = self._get_process_icon_pixmap(pid, icon_size=16, force_grayscale=not slider.isEnabled())
+                pixmap = self._get_process_icon_pixmap(pid, icon_size=16, force_grayscale=self._is_row_muted(slider))
                 if pixmap:
                     icon_label.setPixmap(pixmap)
 
@@ -336,6 +358,7 @@ class VolumeWidget(BaseWidget):
             self.config.audio_menu.round_corners,
             self.config.audio_menu.round_corners_type,
             self.config.audio_menu.border_color,
+            bar_anchored=self.config.audio_menu.anchor == "bar",
         )
         self.dialog.setProperty("class", "audio-menu")
 
@@ -368,6 +391,11 @@ class VolumeWidget(BaseWidget):
                 self.device_buttons[device_id] = btn
 
             self.container.setLayout(self.container_layout)
+
+        if self.config.audio_menu.slider_style == "fill":
+            self._add_fill_rows(layout)
+            self._open_dialog(layout)
+            return
 
         layout.addWidget(self.container)
 
@@ -407,10 +435,7 @@ class VolumeWidget(BaseWidget):
         audio_sessions: list[AudioSessionInfo] = []
         if self.config.audio_menu.show_apps:
             # Get active audio sessions directly from service
-            audio_sessions = self._service.get_active_audio_sessions(
-                get_app_name_callback=get_app_name_from_pid,
-                format_name_callback=self._format_session_label,
-            )
+            audio_sessions = self._get_audio_sessions()
             # Add app toggle button on the right (only if there are audio sessions)
             if audio_sessions:
                 self.app_toggle_btn = QPushButton(self.config.audio_menu.app_icons.toggle_down)
@@ -527,20 +552,118 @@ class VolumeWidget(BaseWidget):
 
             # Store expanded state
             self.app_volumes_expanded = False
-        self.dialog.setLayout(layout)
+        self._open_dialog(layout)
+        # Automatically expand app volumes if configured
+        if audio_sessions and self.config.audio_menu.show_apps_expanded and self.config.audio_menu.show_apps:
+            self._toggle_app_volumes()
 
-        # Position the dialog
-        self.dialog.adjustSize()
-        self.dialog.setPosition(
+    def _open_dialog(self, layout: QVBoxLayout) -> None:
+        dialog = self.dialog
+        if dialog is None:
+            return
+        dialog.setLayout(layout)
+        dialog.adjustSize()
+        dialog.setPosition(
             alignment=self.config.audio_menu.alignment,
             direction=self.config.audio_menu.direction,
             offset_left=self.config.audio_menu.offset_left,
             offset_top=self.config.audio_menu.offset_top,
         )
-        self.dialog.show()
-        # Automatically expand app volumes if configured
-        if audio_sessions and self.config.audio_menu.show_apps_expanded and self.config.audio_menu.show_apps:
-            self._toggle_app_volumes()
+        dialog.show()
+
+    def _add_fill_rows(self, layout: QVBoxLayout) -> None:
+        """Layout for slider_style fill: the master row is named after the device, devices fold under it, apps below."""
+        menu = self.config.audio_menu
+        speakers = self._service.get_speakers()
+        device_name = (dict(self.devices).get(speakers.id) if speakers else None) or ""
+
+        master = FillSlider(menu.device_icon, device_name)
+        master.setProperty("class", "volume-slider fill-slider")
+        self._apply_slider_scroll_step(master)
+        if self.config.tooltip and device_name:
+            set_tooltip(master, device_name, delay=800, position="top")
+        self.volume_slider = master
+        self._update_slider_value()
+        master.valueChanged.connect(self._on_slider_value_changed)
+        master.sliderReleased.connect(self._on_slider_released)
+        master.right_clicked.connect(self.toggle_mute)
+        layout.addWidget(master)
+
+        if len(self.devices) > 1:
+            toggle = QPushButton(f"{menu.switch_device_label} {menu.app_icons.toggle_down}")
+            toggle.setProperty("class", "toggle-devices")
+            toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+            toggle.clicked.connect(partial(self._toggle_devices, toggle))
+            layout.addWidget(toggle, 0, Qt.AlignmentFlag.AlignRight)
+            self.container.hide()
+            layout.addWidget(self.container)
+
+        self._app_icon_rows = {}
+        if not menu.show_apps:
+            return
+        sessions = self._get_audio_sessions()
+        if not sessions:
+            return
+        apps = QFrame()
+        apps.setProperty("class", "apps-container")
+        apps_layout = QVBoxLayout(apps)
+        apps_layout.setSpacing(0)
+        apps_layout.setContentsMargins(0, 0, 0, 0)
+        for session in sessions:
+            apps_layout.addWidget(self._app_fill_row(session))
+        layout.addWidget(apps)
+
+    def _get_audio_sessions(self) -> list[AudioSessionInfo]:
+        menu = self.config.audio_menu
+        return self._service.get_active_audio_sessions(
+            get_app_name_callback=get_app_name_from_pid,
+            format_name_callback=self._format_session_label,
+            system_sounds_label=menu.system_sounds_label if menu.show_system_sounds else None,
+        )
+
+    def _app_fill_row(self, session: AudioSessionInfo) -> FillSlider:
+        volume_interface = session["volume_interface"]
+        pid = session["pid"]
+        icon = "" if pid else self.config.audio_menu.system_sounds_icon
+        row = FillSlider(icon, session.get("app_name", self._format_session_label(session["name"])))
+        row.setProperty("class", "app-slider fill-slider")
+        self._apply_slider_scroll_step(row)
+        try:
+            row.setValue(round(volume_interface.GetMasterVolume() * 100))
+        except:
+            row.setValue(100)
+        try:
+            is_muted = bool(volume_interface.GetMute())
+        except:
+            is_muted = False
+        self._set_row_muted(row, is_muted)
+
+        if self.config.audio_menu.show_app_icons and pid:
+            icon_label = row.icon_label
+            icon_label.setFixedSize(16, 16)
+            icon_label.show()
+            pixmap = self._get_process_icon_pixmap(pid, icon_size=16, force_grayscale=is_muted)
+            if pixmap:
+                icon_label.setPixmap(pixmap)
+            self._app_icon_rows.setdefault(pid, []).append((icon_label, row))
+        elif not pid:
+            row.icon_label.setFixedWidth(16)
+
+        row.valueChanged.connect(partial(self._set_app_volume, volume_interface, slider=row))
+        row.sliderReleased.connect(self._on_slider_released)
+        row.right_clicked.connect(partial(self._toggle_app_mute, volume_interface, row.icon_label, row, pid))
+        return row
+
+    def _toggle_devices(self, toggle: QPushButton) -> None:
+        expanded = self.container.isHidden()
+        self.container.setVisible(expanded)
+        icons = self.config.audio_menu.app_icons
+        toggle.setText(
+            f"{self.config.audio_menu.switch_device_label} {icons.toggle_up if expanded else icons.toggle_down}"
+        )
+        toggle.setProperty("class", "toggle-devices expanded" if expanded else "toggle-devices")
+        refresh_widget_style(toggle)
+        self._resize_dialog()
 
     def _toggle_label(self):
         self._show_alt_label = not self._show_alt_label
@@ -708,5 +831,6 @@ class VolumeWidget(BaseWidget):
             current_mute_status = self.volume.GetMute()
             self.volume.SetMute(not current_mute_status, None)
             self._update_label()
+            self._sync_master_mute()
         except Exception as e:
             logging.error("Failed to toggle mute: %s", e)

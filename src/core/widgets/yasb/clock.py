@@ -752,6 +752,7 @@ class ClockWidget(BaseWidget):
             self.config.calendar.round_corners,
             self.config.calendar.round_corners_type,
             self.config.calendar.border_color,
+            bar_anchored=self.config.calendar.anchor == "bar",
         )
         self._yasb_calendar.setProperty("class", "clock-popup calendar")
 
@@ -909,9 +910,17 @@ class ClockWidget(BaseWidget):
             direction=self.config.calendar.direction,
             offset_left=self.config.calendar.offset_left,
             offset_top=self.config.calendar.offset_top,
+            anchor=self._calendar_anchor(),
         )
 
         self._yasb_calendar.show()
+
+    def _calendar_anchor(self) -> QWidget | None:
+        """The bar section holding this clock when calendar.anchor is section, so every clock there opens one spot."""
+        if self.config.calendar.anchor != "section" or self.parent_layout_type is None:
+            return None
+        section_frame = getattr(self.window(), "section_frame", None)
+        return section_frame(self.parent_layout_type) if callable(section_frame) else None
 
     def _show_context_menu(self):
         """Build and display the context menu for the clock widget."""
@@ -1060,6 +1069,7 @@ class ClockWidget(BaseWidget):
             self.config.calendar.round_corners,
             self.config.calendar.round_corners_type,
             self.config.calendar.border_color,
+            bar_anchored=self.config.calendar.anchor == "bar",
         )
         popup.setProperty("class", f"clock-popup {class_name}")
         return popup

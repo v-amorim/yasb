@@ -16,6 +16,7 @@ from core.utils.utilities import PopupWidget, refresh_widget_style
 from core.validation.widgets.yasb.weather import WeatherWidgetConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.weather.api import IconFetcher, WeatherDataFetcher
+from core.widgets.services.weather.hour_chart import ChartHour, HourChart
 from core.widgets.services.weather.models import WeatherApiResponse
 from core.widgets.services.weather.widgets import (
     ClickableWidget,
@@ -23,6 +24,16 @@ from core.widgets.services.weather.widgets import (
     HourlyDataLineWidget,
     HourlyTemperatureScrollArea,
 )
+
+RAIN_CHANCE_ICON = chr(0xF058C)  # Nerd Font water drop
+# A day at or above this rain chance is marked rainy in the rows layout
+RAINY_CHANCE = 80
+# The chart layout marks a day tile rainy above this chance
+CHART_RAINY_CHANCE = 50
+CHART_PARTLY_ICON = chr(0xF0595)  # Nerd Font partly cloudy, for a rainy code with a low chance
+CHART_HOURS = 12
+CHART_WIDTH = 250
+CHART_HEIGHT = 84
 
 
 class WeatherWidget(BaseWidget):
@@ -65,6 +76,7 @@ class WeatherWidget(BaseWidget):
         self._current_time: datetime | None = None
         self._show_alt_label = False
         self._weather_card_daily_widgets: list[ClickableWidget] = []
+        self._card_rows: dict[str, Any] | None = None
 
         # Construct container
         self._init_container()
@@ -103,6 +115,7 @@ class WeatherWidget(BaseWidget):
             self.config.weather_card.round_corners,
             self.config.weather_card.round_corners_type,
             self.config.weather_card.border_color,
+            bar_anchored=self.config.weather_card.anchor == "bar",
         )
         self.dialog.setProperty("class", "weather-card")
 
@@ -121,6 +134,19 @@ class WeatherWidget(BaseWidget):
             layout.addWidget(icon_label)
             layout.addWidget(info_label)
             self.dialog.setLayout(layout)
+            self.dialog.adjustSize()
+            self.dialog.setPosition(
+                alignment=self.config.weather_card.alignment,
+                direction=self.config.weather_card.direction,
+                offset_left=self.config.weather_card.offset_left,
+                offset_top=self.config.weather_card.offset_top,
+            )
+            self.dialog.show()
+            return
+
+        if self.config.weather_card.layout in ("rows", "chart") and self._card_rows is not None:
+            build_card = self._build_chart_card if self.config.weather_card.layout == "chart" else self._build_rows_card
+            self.dialog.setLayout(build_card(self._card_rows))
             self.dialog.adjustSize()
             self.dialog.setPosition(
                 alignment=self.config.weather_card.alignment,
@@ -351,6 +377,167 @@ class WeatherWidget(BaseWidget):
             except Exception as e:
                 logging.debug("Failed to update weather card icons: %s", e)
 
+    def _build_rows_card(self, rows: dict[str, Any]) -> QVBoxLayout:
+        def label(text: str, class_name: str, parent: QWidget) -> QLabel:
+            part = QLabel(text, parent)
+            part.setProperty("class", class_name)
+            return part
+
+        def rule(class_name: str, parent: QWidget) -> QFrame:
+            line = QFrame(parent)
+            line.setProperty("class", class_name)
+            return line
+
+        card = QVBoxLayout()
+        card.setContentsMargins(0, 0, 0, 0)
+        card.setSpacing(0)
+
+        now = QFrame(self.dialog)
+        now.setProperty("class", "now")
+        now_layout = QHBoxLayout(now)
+        now_layout.setContentsMargins(0, 0, 0, 0)
+        temp_column = QVBoxLayout()
+        temp_column.setSpacing(0)
+        temp_column.addWidget(label(rows["temp"], "now-temp", now))
+        temp_column.addWidget(label(rows["condition"], "now-condition", now))
+        now_layout.addLayout(temp_column)
+        now_layout.addWidget(rule("now-rule", now))
+        facts = QVBoxLayout()
+        facts.setSpacing(0)
+        facts.addStretch(1)
+        for name, value in rows["facts"]:
+            fact = QHBoxLayout()
+            fact.addWidget(label(name, "fact-label", now))
+            fact.addWidget(label(value, "fact-value", now))
+            fact.addStretch(1)
+            facts.addLayout(fact)
+        facts.addStretch(1)
+        now_layout.addLayout(facts, 1)
+        card.addWidget(now)
+        card.addWidget(label(rows["place"], "now-place", self.dialog))
+        card.addWidget(rule("days-rule", self.dialog))
+
+        for day in rows["days"]:
+            row = QFrame(self.dialog)
+            row.setProperty("class", "day-row rainy" if day["rainy"] else "day-row")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(label(day["name"], "day-name", row))
+            row_layout.addWidget(label(day["icon"], "day-icon", row))
+            row_layout.addStretch(1)
+            for text, class_name in (
+                (day["low"], "day-low"),
+                ("/", "day-slash"),
+                (day["high"], "day-high"),
+                (RAIN_CHANCE_ICON, "day-drop"),
+                (day["rain"], "day-rain"),
+            ):
+                row_layout.addWidget(label(text, class_name, row))
+            card.addWidget(row)
+        return card
+
+    def _build_chart_card(self, rows: dict[str, Any]) -> QVBoxLayout:
+        def label(text: str, class_name: str, parent: QWidget) -> QLabel:
+            part = QLabel(text, parent)
+            part.setProperty("class", class_name)
+            return part
+
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        body = QFrame(self.dialog)
+        body.setProperty("class", "chart-card")
+        outer.addWidget(body)
+        card = QVBoxLayout(body)
+        card.setContentsMargins(0, 0, 0, 0)
+        card.setSpacing(0)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        now = QHBoxLayout()
+        now.setSpacing(8)
+        temp = label(rows["temp"], "chart-temp", body)
+        condition = label(rows["condition"], "chart-condition", body)
+        # Qt has no baseline alignment: lift the smaller text by the difference of the two descents
+        temp.ensurePolished()
+        condition.ensurePolished()
+        condition.setContentsMargins(0, 0, 0, temp.fontMetrics().descent() - condition.fontMetrics().descent())
+        now.addWidget(temp, 0, Qt.AlignmentFlag.AlignBottom)
+        now.addWidget(condition, 0, Qt.AlignmentFlag.AlignBottom)
+        now.addStretch(1)
+        facts = QHBoxLayout()
+        facts.setSpacing(14)
+        for name, value in rows["facts"]:
+            fact = QVBoxLayout()
+            fact.setSpacing(0)
+            fact.addWidget(label(name, "chart-fact-label", body))
+            fact.addWidget(label(value, "chart-fact-value", body))
+            facts.addLayout(fact)
+        facts.addStretch(1)
+        left = QVBoxLayout()
+        left.setSpacing(0)
+        left.addLayout(now)
+        left.addWidget(label(rows["place"], "chart-place", body))
+        left.addLayout(facts)
+        left.addStretch(1)
+        top.addLayout(left, 1)
+        chart = HourChart(rows["hours"], RAIN_CHANCE_ICON, body)
+        chart.setFixedSize(CHART_WIDTH, CHART_HEIGHT)
+        top.addWidget(chart, 0, Qt.AlignmentFlag.AlignTop)
+        card.addLayout(top)
+
+        rule = QFrame(body)
+        rule.setProperty("class", "chart-rule")
+        card.addWidget(rule)
+
+        tiles = QHBoxLayout()
+        tiles.setSpacing(8)
+        for day in rows["days"]:
+            rainy = day["rain_value"] > CHART_RAINY_CHANCE
+            tile = QFrame(body)
+            tile.setProperty("class", "tile rainy" if rainy else "tile")
+            column = QVBoxLayout(tile)
+            column.setSpacing(0)
+            for text, class_name in ((day["name"], "tile-name"), (day["icon"], "tile-icon")):
+                column.addWidget(label(text, class_name, tile), 0, Qt.AlignmentFlag.AlignHCenter)
+            temps = QHBoxLayout()
+            temps.setSpacing(0)
+            temps.addStretch(1)
+            for text, class_name in ((day["low"], "tile-low"), (" / ", "tile-slash"), (day["high"], "tile-high")):
+                temps.addWidget(label(text, class_name, tile))
+            temps.addStretch(1)
+            column.addLayout(temps)
+            rain = QHBoxLayout()
+            rain.setSpacing(0)
+            rain.addStretch(1)
+            for text, class_name in ((RAIN_CHANCE_ICON, "tile-drop"), (f" {day['rain']}", "tile-rain")):
+                rain.addWidget(label(text, class_name, tile))
+            rain.addStretch(1)
+            column.addLayout(rain)
+            tiles.addWidget(tile, 1)
+        card.addLayout(tiles)
+        return outer
+
+    def _tile_icon(self, entry: Any) -> str:
+        icon_name = get_weather(entry.day.condition.code, True)[0]
+        if icon_name.startswith("rainy") and entry.day.daily_chance_of_rain <= CHART_RAINY_CHANCE:
+            return CHART_PARTLY_ICON
+        return getattr(self.config.icons, icon_name)
+
+    def _chart_hours(self, all_hourly: list[Any]) -> list[ChartHour]:
+        if not self._current_time:
+            return []
+        start = self._current_time.hour + 1
+        return [
+            ChartHour(
+                label=f"{datetime.strptime(hour.time, '%Y-%m-%d %H:%M').hour:02d}h",
+                temp=hour.temp_f if self.config.units == "imperial" else hour.temp_c,
+                temp_text=self._degrees(hour.temp_f, hour.temp_c),
+                feels_text=self._degrees(hour.feelslike_f, hour.feelslike_c),
+                rain=hour.chance_of_rain,
+            )
+            for hour in all_hourly[start : start + CHART_HOURS]
+        ]
+
     def _set_pixmap(self, label: QLabel, icon_bytes: bytes):
         """Set the pixmap for the day icon label."""
         pixmap = QPixmap()
@@ -445,6 +632,9 @@ class WeatherWidget(BaseWidget):
         unit = "°F" if self.config.units == "imperial" else "°C"
         value = round(temp) if self.config.hide_decimal else temp
         return f"{value}{unit}"
+
+    def _degrees(self, temp_f: float, temp_c: float) -> str:
+        return self._format_temp(temp_f, temp_c)[:-1]
 
     def _format_measurement(self, imperial_val: float, imperial_unit: str, metric_val: float, metric_unit: str) -> str:
         if self.config.units == "imperial":
@@ -555,6 +745,29 @@ class WeatherWidget(BaseWidget):
                 "{alert_end_date}": self._format_alert_datetime(first_alert.expires)
                 if first_alert and first_alert.expires
                 else None,
+            }
+            self._card_rows = {
+                "temp": self._degrees(current.temp_f, current.temp_c),
+                "condition": weather_text,
+                "facts": [
+                    ("Feels", self._degrees(current.feelslike_f, current.feelslike_c)),
+                    ("Humidity", f"{current.humidity:g}%"),
+                    ("Rain", f"{forecast.daily_chance_of_rain:g}%"),
+                ],
+                "place": location.name,
+                "days": [
+                    {
+                        "name": "Today" if index == 0 else datetime.strptime(entry.date, "%Y-%m-%d").strftime("%a %d"),
+                        "icon": self._tile_icon(entry),
+                        "low": self._degrees(entry.day.mintemp_f, entry.day.mintemp_c),
+                        "high": self._degrees(entry.day.maxtemp_f, entry.day.maxtemp_c),
+                        "rain": f"{entry.day.daily_chance_of_rain:g}%",
+                        "rainy": entry.day.daily_chance_of_rain >= RAINY_CHANCE,
+                        "rain_value": entry.day.daily_chance_of_rain,
+                    }
+                    for index, entry in enumerate((fc_today, fc_day1, fc_day2))
+                ],
+                "hours": self._chart_hours(list(all_hourly)),
             }
             self._has_valid_weather_data = True
         except Exception as e:

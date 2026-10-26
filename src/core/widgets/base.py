@@ -115,7 +115,12 @@ class BaseWidget(QWidget):
 
     @override
     def contextMenuEvent(self, a0: QContextMenuEvent | None) -> None:
-        if a0 is not None:
+        if a0 is None:
+            return
+        # A right-click set to do_nothing goes on to the bar, so its menu opens over the widget
+        if self.callback_right == "do_nothing":
+            a0.ignore()
+        else:
             a0.accept()
 
     def _handle_mouse_events(self, event: QMouseEvent):

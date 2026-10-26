@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field
 
 from core.validation.widgets.base_model import CustomBaseModel
@@ -12,6 +14,8 @@ class SystrayPopupConfig(CustomBaseModel):
     direction: str = "down"
     offset_top: int = 6
     offset_left: int = 0
+    # bar: the popup hangs flush under the bar frame, as wide as the bar, and the bar squares its bottom while it is open
+    anchor: Literal["widget", "bar"] = "widget"
 
 
 class SystrayWidgetConfig(CustomBaseModel):

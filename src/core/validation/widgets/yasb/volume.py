@@ -22,12 +22,19 @@ class AudioMenuConfig(CustomBaseModel):
     alignment: str = "right"
     direction: str = "down"
     offset_top: int = 6
+    anchor: Literal["widget", "bar"] = "widget"
     offset_left: int = 0
     show_apps: bool = False
     show_app_labels: bool = False
     show_app_icons: bool = True
     show_apps_expanded: bool = False
     app_icons: VolumeAppIconsConfig = VolumeAppIconsConfig()
+    slider_style: Literal["default", "fill"] = "default"
+    device_icon: str = "\uf025"
+    switch_device_label: str = "Switch device"
+    show_system_sounds: bool = False
+    system_sounds_label: str = "System sounds"
+    system_sounds_icon: str = "\uf028"
 
 
 class VolumeProgressBarConfig(CustomBaseModel):

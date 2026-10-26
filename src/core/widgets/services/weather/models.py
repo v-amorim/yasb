@@ -79,6 +79,8 @@ class HourForecast(_WeatherBase):
     time: str = ""
     temp_c: float = 0.0
     temp_f: float = 0.0
+    feelslike_c: float = 0.0
+    feelslike_f: float = 0.0
     wind_kph: float = 0.0
     wind_mph: float = 0.0
     humidity: float = 0.0

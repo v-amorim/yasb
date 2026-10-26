@@ -71,6 +71,29 @@ brightness_menu:
   offset_left: 0
   contrast_icon: "\ue7a1"
   brightness_icon: "\ue706"
+  slider_style: "default"
+  brightness_label: "Brightness"
+  contrast_label: "Contrast"
+  presets: []
+  presets_columns: 2
+```
+
+### Fill sliders and presets
+
+`slider_style: "fill"` draws each slider as a row that fills up to its level, with the icon, the name and the value printed on it. `presets` adds buttons above the sliders; each one sets every monitor to its levels at once and shows them as `B15 C40` (brightness, then contrast when set), and the one matching the current levels gets the `active` class.
+
+```yaml
+brightness_menu:
+  slider_style: "fill"
+  presets_columns: 2
+  presets:
+    - name: "Night coding"
+      icon: "\uf186"
+      brightness: 15
+      contrast: 40
+    - name: "Sunny day"
+      icon: "\uf185"
+      brightness: 90
 ```
 
 ## Progress Bar Options
@@ -145,6 +168,11 @@ progress_bar:
   - **offset_left**: Set the left offset of the menu.
   - **brightness_icon**: The icon to use for the brightness slider in the menu.
   - **contrast_icon**: The icon to use for the contrast slider in the menu.
+  - **slider_style**: `"default"` for the regular sliders, `"fill"` for rows that fill up to their level and print the value.
+  - **brightness_label**: The name printed on the brightness row when `slider_style` is `"fill"`.
+  - **contrast_label**: The name printed on the contrast row when `slider_style` is `"fill"`.
+  - **presets**: A list of presets shown as buttons above the sliders. Each has a `name`, an optional `icon`, a `brightness` from 0 to 100 and an optional `contrast` from 0 to 100. Clicking one sets every monitor; contrast applies only to monitors that support it.
+  - **presets_columns**: How many preset buttons sit on each row, from 1 to 6.
 - **auto_light:** Whether to automatically adjust the brightness icon based on the current brightness level.
 - **auto_light_icon:** The icon to use when the auto_light option is enabled.
 - **auto_light_night_level:** The brightness level at which the widget switches to the night.
@@ -220,6 +248,27 @@ adjust if you have multiple monitors and want to style them differently correctl
 .contrast-slider::groove {}
 .brightness-slider::handle{} 
 .contrast-slider::handle{}
+
+/* Fill sliders: background-color is the empty track, selection-background-color the filled part */
+.brightness-menu .fill-slider {
+    background-color: rgba(255, 255, 255, 0.05);
+    selection-background-color: rgba(115, 134, 208, 0.35);
+    color: #ffffff;
+    qproperty-radius: 8;
+    min-height: 28px;
+}
+.brightness-menu .fill-slider .icon {}
+.brightness-menu .fill-slider .label {}
+.brightness-menu .fill-slider .value {}
+
+/* Presets */
+.brightness-menu .presets {}
+.brightness-menu .preset {}
+.brightness-menu .preset:hover {}
+.brightness-menu .preset.active {}
+.brightness-menu .preset .icon {}
+.brightness-menu .preset .name {}
+.brightness-menu .preset .level {}
 
 /* Brightness progress bar styles if enabled */
 .brightness-widget .progress-container {} 

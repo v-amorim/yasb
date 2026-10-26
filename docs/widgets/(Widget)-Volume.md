@@ -112,7 +112,21 @@ volume:
       app_icons: # Icons for the toggle button to expand/collapse application volumes
         toggle_down: "\uf078" # Icon for btn collapsed state
         toggle_up: "\uf077" # Icon for btn expanded state
+      slider_style: "default" # "default" for regular sliders, "fill" for rows that fill up to their level
+      device_icon: "\uf025" # Icon on the master row when slider_style is "fill"
+      switch_device_label: "Switch device" # Text of the button that unfolds the device list when slider_style is "fill"
 ```
+
+### Fill sliders
+
+`slider_style: "fill"` draws every level as a row that fills up to it, with the icon, the name and the value printed on it. The master row carries the name of the current device. A **Switch device** button under it unfolds the device list when there is more than one device. Application rows always show below; `show_apps_expanded` and the app toggle do not apply. Right-click a row to mute it: the master row mutes the system, an app row mutes that app, and a muted row gets the `muted` class. A name longer than the row ends in an ellipsis.
+
+```yaml
+audio_menu:
+  slider_style: "fill"
+  show_apps: true
+```
+
 ## Description of Options
 
 - **label**: The format string for the volume label. Available placeholders are `{icon}` for the volume icon and `{level}` for the volume percentage or muted text.
@@ -140,6 +154,9 @@ volume:
   - **app_icons**: A dictionary specifying icons for the toggle button to expand/collapse application volumes. It contains the following keys:
     - **toggle_down**: Icon for the button in the collapsed state.
     - **toggle_up**: Icon for the button in the expanded state.
+  - **slider_style**: `"default"` for the regular sliders, `"fill"` for rows that fill up to their level and print the value. See [Fill sliders](#fill-sliders).
+  - **device_icon**: The icon on the master row when `slider_style` is `"fill"`.
+  - **switch_device_label**: The text of the button that unfolds the device list when `slider_style` is `"fill"`. The `app_icons` chevrons follow it.
 - **keybindings**: A list of global hotkeys for this widget. See [Keybindings](./Keybindings).
 - **callbacks:** Mouse event callbacks. See [Callbacks](#callbacks).
 - **progress_bar**: A dictionary containing settings for the progress bar. It includes:
@@ -188,6 +205,22 @@ volume:
 .audio-menu .apps-container .app-volume .app-label {} /* Application label */
 .audio-menu .apps-container .app-volume .app-icon-container .app-icon {} /* Application icon */
 .audio-menu .apps-container .app-volume .app-slider {} /* Application volume slider */  
+/* Fill sliders: background-color is the empty track, selection-background-color the filled part */
+.audio-menu .fill-slider {
+    background-color: rgba(255, 255, 255, 0.05);
+    selection-background-color: rgba(115, 134, 208, 0.35);
+    color: #ffffff;
+    qproperty-radius: 8;
+    min-height: 28px;
+}
+.audio-menu .volume-slider.fill-slider {} /* Master row */
+.audio-menu .app-slider.fill-slider {} /* Application rows */
+.audio-menu .fill-slider.muted {}
+.audio-menu .fill-slider .icon {}
+.audio-menu .fill-slider .label {}
+.audio-menu .fill-slider .value {}
+.audio-menu .toggle-devices {}
+.audio-menu .toggle-devices.expanded {}
 ```
 
 ## Example Styles

@@ -15,6 +15,7 @@ from core.utils.win32.constants import (
     DWMWA_SYSTEMBACKDROP_TYPE,
     DWMWA_USE_IMMERSIVE_DARK_MODE,
     DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_DONOTROUND,
     DWMWCP_ROUND,
     DWMWCP_ROUNDSMALL,
 )
@@ -79,6 +80,24 @@ def set_window_corner_preference(hwnd: int, preference: int, border_color: str) 
     )
     if result != 0:
         raise ctypes.WinError(result)
+
+
+def enable_round_corners(
+    hwnd: int | sip.voidptr, round_corners_type: str = "normal", border_color: str = "System"
+) -> None:
+    try:
+        set_window_corner_preference(
+            int(hwnd), DWMWCP_ROUND if round_corners_type == "normal" else DWMWCP_ROUNDSMALL, border_color
+        )
+    except Exception as e:
+        logging.debug("Failed to apply round corners: %s", e)
+
+
+def disable_round_corners(hwnd: int | sip.voidptr) -> None:
+    try:
+        set_window_corner_preference(int(hwnd), DWMWCP_DONOTROUND, "None")
+    except Exception as e:
+        logging.debug("Failed to disable round corners: %s", e)
 
 
 def enable_blur(

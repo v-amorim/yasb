@@ -2,7 +2,7 @@ import logging
 from typing import TYPE_CHECKING, override
 
 from PyQt6.QtCore import QEvent, QObject, QRect, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QCloseEvent, QContextMenuEvent, QResizeEvent, QScreen, QShowEvent
+from PyQt6.QtGui import QCloseEvent, QContextMenuEvent, QHideEvent, QResizeEvent, QScreen, QShowEvent
 from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QWidget
 
 from core.bar_helper import (
@@ -12,6 +12,7 @@ from core.bar_helper import (
     BarAnimationManager,
     BarCliManager,
     BarContextMenu,
+    BelowStrip,
     MaximizedWindowWatcher,
     OsThemeManager,
 )
@@ -67,7 +68,11 @@ class Bar(QWidget):
         self._maximized_watcher = None
         self._animation_manager = None
         self._auto_width_manager = None
+        self._popup_owner: QWidget | None = None
+        self._popup_extra = 0
         self._cli_manager = None
+        self._below_strip: BelowStrip | None = None
+        self._section_frames: dict[str, QFrame] = {}
         self.target_screen = bar_screen
 
         self.screen_name = self.target_screen.name()
@@ -112,6 +117,8 @@ class Bar(QWidget):
         self.monitor_hwnd = MonitorFromWindow(int(self.winId()))
 
         self._add_widgets(widgets)
+        if widgets.get("below"):
+            self._below_strip = BelowStrip(self, widgets["below"], stylesheet)
 
         if self._is_auto_width:
             self._auto_width_manager = AutoWidthManager(self, self)
@@ -156,6 +163,17 @@ class Bar(QWidget):
     def bar_id(self) -> str:
         return self._bar_id
 
+    @property
+    def widgets(self) -> dict[str, list[BaseWidget]]:
+        return self._widgets
+
+    @property
+    def bar_height(self) -> int:
+        """The configured height, or the peek height while auto-hide has the bar collapsed."""
+        if self.autohide_manager is not None and self.autohide_manager.is_peeking():
+            return self.autohide_manager.peek_height
+        return self.dimensions["height"]
+
     def on_geometry_changed(self, geo: QRect) -> None:
         logging.info(
             "Screen geometry changed. Updating position for bar %s on screen %s",
@@ -175,7 +193,7 @@ class Bar(QWidget):
     def update_app_bar(self) -> None:
         if self.app_bar_manager:
             # Always register AppBar for notifications, but only reserve space when windows_app_bar is true
-            reserve_space = self.window_flags["windows_app_bar"]
+            reserve_space = self.window_flags["windows_app_bar"] and not self.window_flags["auto_hide"]
             scale_screen_height = self.target_screen.devicePixelRatio() > 1.0
             self.app_bar_manager.create_appbar(
                 self.winId().__int__(),
@@ -222,8 +240,19 @@ class Bar(QWidget):
         return x, y
 
     def position_bar(self, init: bool = False) -> None:
+        if self.autohide_manager is not None and self.autohide_manager.is_animating():
+            return
+        bar_x, bar_y, bar_width, bar_height = self.resting_geometry()
+        self.bar_frame.setGeometry(0, 0, bar_width, bar_height)
+        self.setGeometry(bar_x, bar_y, bar_width, bar_height)
+        self.sync_below_strip()
+
+    def resting_geometry(self, peeking: bool | None = None) -> tuple[int, int, int, int]:
+        """The window rect (x, y, width, height) the bar rests at, in the given peek state or its current one."""
         bar_width = self.dimensions["width"]
-        bar_height = self.dimensions["height"]
+        bar_height = self.bar_height
+        if peeking is not None and self.autohide_manager is not None:
+            bar_height = self.autohide_manager.peek_height if peeking else self.dimensions["height"]
 
         screen_width = self.target_screen.geometry().width()
         screen_height = self.target_screen.geometry().height()
@@ -253,8 +282,7 @@ class Bar(QWidget):
         if extra and self.alignment["position"] == "bottom":
             bar_y -= extra
 
-        self.bar_frame.setGeometry(0, 0, bar_width, bar_height + extra)
-        self.setGeometry(bar_x, bar_y, bar_width, bar_height + extra)
+        return bar_x, bar_y, bar_width, bar_height + extra
 
     def _add_widgets(self, widgets: dict[str, list[BaseWidget]]):
         bar_layout = QGridLayout()
@@ -289,8 +317,55 @@ class Bar(QWidget):
 
             layout_container.setLayout(layout)
             bar_layout.addWidget(layout_container, 0, column_num)
+            self._section_frames[layout_type] = layout_container
+
+        if self.config.layouts.balanced:
+            # Equal stretch on equal minimums keeps the center column mid-bar when the bar is wider than its content
+            bar_layout.setColumnStretch(0, 1)
+            bar_layout.setColumnStretch(2, 1)
+            self.bar_frame.installEventFilter(self)
+            self.balance_sections()
 
         self.bar_frame.setLayout(bar_layout)
+
+    def balance_sections(self) -> None:
+        """With layouts.balanced, size the left and right sections to the wider one, so the center sits mid-bar."""
+        if not self.config.layouts.balanced or not self._section_frames:
+            return
+        left, right = self._section_frames["left"], self._section_frames["right"]
+        width = max(left.sizeHint().width(), right.sizeHint().width())
+        left.setMinimumWidth(width)
+        right.setMinimumWidth(width)
+
+    def widen_for_popup(self, owner: QWidget, width: int | None) -> None:
+        """Widen an auto-width bar to an open popup's width, content kept in place; None gives the width back."""
+        layout = self.bar_frame.layout()
+        if not self._is_auto_width or layout is None:
+            return
+        if self.autohide_manager is not None:
+            self.autohide_manager.finish_motion()
+        if width is None:
+            if self._popup_owner is not owner:
+                return
+            self._popup_owner = None
+            extra = 0
+        else:
+            self._popup_owner = owner
+            extra = max(0, width - (self.bar_frame.width() - self._popup_extra))
+        if extra == self._popup_extra:
+            return
+        self._popup_extra = extra
+        layout.setContentsMargins(extra // 2, 0, extra - extra // 2, 0)
+        layout.activate()
+        self.position_bar()
+        self.repaint()
+
+    def section_frame(self, name: str) -> QFrame | None:
+        return self._section_frames.get(name)
+
+    def sync_below_strip(self) -> None:
+        if self._below_strip is not None:
+            self._below_strip.sync()
 
     def show_bar(self):
         if self._animation_manager:
@@ -310,9 +385,17 @@ class Bar(QWidget):
                 self._animation_manager.start_fade(True)
             else:
                 self.show_bar()
+        self.sync_below_strip()
+
+    @override
+    def hideEvent(self, a0: QHideEvent | None) -> None:
+        super().hideEvent(a0)
+        self.sync_below_strip()
 
     @override
     def closeEvent(self, a0: QCloseEvent | None) -> None:
+        if self._below_strip is not None:
+            self._below_strip.close()
         if self._hide_on_fullscreen and self.app_bar_manager:
             AppBarManager().unregister_bar(int(self.winId()))
 
@@ -340,8 +423,12 @@ class Bar(QWidget):
 
     @override
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 == self.bar_frame and a1 is not None and a1.type() == QEvent.Type.LayoutRequest:
+            self.balance_sections()
+        animating = self.autohide_manager is not None and self.autohide_manager.is_animating()
         if (
-            self._is_auto_width
+            not animating
+            and self._is_auto_width
             and self._auto_width_manager
             and a0 == self.bar_frame
             and a1 is not None
@@ -377,6 +464,8 @@ class Bar(QWidget):
             parent_widget = widget_at_pos
             while parent_widget and parent_widget != self:
                 if hasattr(parent_widget, "parent_layout_type"):
+                    if getattr(parent_widget, "callback_right", None) == "do_nothing":
+                        break
                     a0.ignore()
                     return
                 parent_widget = parent_widget.parent()

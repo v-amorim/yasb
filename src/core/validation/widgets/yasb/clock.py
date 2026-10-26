@@ -1,5 +1,5 @@
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, RootModel
 
@@ -19,6 +19,7 @@ class ClockCalendarConfig(CustomBaseModel):
     direction: str = "down"
     offset_top: int = 6
     offset_left: int = 0
+    anchor: Literal["widget", "section", "bar"] = "widget"
     country_code: str | None = None
     subdivision: str | None = None
     show_holidays: bool = False

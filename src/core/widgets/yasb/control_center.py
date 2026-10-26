@@ -7,6 +7,7 @@ from core.utils.win32.utils import get_widget_monitor_hwnd
 from core.validation.widgets.yasb.control_center import ControlCenterConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.brightness.service import BrightnessService
+from core.widgets.services.control_center.sections.folders import FoldersSectionWidget
 from core.widgets.services.control_center.sections.media import MediaSectionWidget
 from core.widgets.services.control_center.sections.power import PowerSectionWidget
 from core.widgets.services.control_center.sections.quick_actions import QuickActionsSectionWidget
@@ -18,6 +19,7 @@ from core.widgets.services.volume.service import AudioOutputService
 type SectionWidget = (
     SystemControlsSectionWidget
     | QuickActionsSectionWidget
+    | FoldersSectionWidget
     | SlidersSectionWidget
     | PowerSectionWidget
     | MediaSectionWidget
@@ -36,6 +38,7 @@ class ControlCenterWidget(BaseWidget):
         self._sections = {
             "system_controls": (config.sections.system_controls, self._build_system_controls_section),
             "quick_actions": (config.sections.quick_actions, self._build_quick_actions_section),
+            "folders": (config.sections.folders, self._build_folders_section),
             "sliders": (config.sections.sliders, self._build_sliders_section),
             "power": (config.sections.power, self._build_power_section),
             "media": (config.sections.media, self._build_media_section),
@@ -101,6 +104,7 @@ class ControlCenterWidget(BaseWidget):
                 round_corners_type=self.config.popup.round_corners_type,
                 border_color=self.config.popup.border_color,
                 persistent=True,
+                bar_anchored=self.config.popup.anchor == "bar",
             )
             self.dialog = dialog
             dialog.setProperty("class", "control-center-menu")
@@ -156,6 +160,9 @@ class ControlCenterWidget(BaseWidget):
             self._input_service,
             self.config.tooltip,
         )
+
+    def _build_folders_section(self, parent: PopupWidget) -> FoldersSectionWidget:
+        return FoldersSectionWidget(parent, self.config.sections.folders)
 
     def _build_sliders_section(self, parent: PopupWidget) -> SlidersSectionWidget:
         return SlidersSectionWidget(

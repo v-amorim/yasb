@@ -58,6 +58,8 @@ class GrouperWidget(BaseWidget):
 
         # Register keybinding callback
         self.register_callback("toggle_collapse", self._toggle_collapsed)
+        # A group has no right-click action, so a right-click on its padding opens the bar menu
+        self.callback_right = "do_nothing"
 
         self._create_child_widgets()
 

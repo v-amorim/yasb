@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QWidgetAction,
 )
 
+from core.bar_motion import BarMotion
 from core.utils.controller import exit_application, reload_application
 from core.utils.shell_utils import shell_open
 from core.utils.utilities import refresh_widget_style
@@ -52,6 +53,7 @@ from core.utils.win32.constants import HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST
 from core.utils.win32.registry_keys import PERSONALIZE_KEY
 from core.utils.win32.structs import MSG, WNDENUMPROC
 from core.utils.win32.utils import apply_qmenu_style
+from core.validation.bar import auto_hide_zone_bounds
 
 if TYPE_CHECKING:
     import PyQt6.sip as sip
@@ -262,7 +264,12 @@ class AutoHideZone(QFrame):
     def enterEvent(self, event: QEnterEvent | None) -> None:
         # Show the parent bar when mouse enters detection zone
         if self._bar.autohide_manager is not None:
-            self._bar.autohide_manager.show_bar()
+            self._bar.autohide_manager.request_show()
+
+    @override
+    def leaveEvent(self, a0: QEvent | None) -> None:
+        if self._bar.autohide_manager is not None:
+            self._bar.autohide_manager.cancel_show()
 
 
 class AutoHideManager(QObject):
@@ -271,10 +278,18 @@ class AutoHideManager(QObject):
     def __init__(self, bar_widget: Bar, parent: QObject | None = None):
         super().__init__(parent)
         self.bar_widget = bar_widget
-        self._autohide_delay = 600
+        flags = bar_widget.window_flags
+        self._autohide_delay: int = flags["auto_hide_hide_delay"]
+        self._show_delay: int = flags["auto_hide_show_delay"]
+        self._zone_start, self._zone_end = auto_hide_zone_bounds(flags["auto_hide_zone"])
+        self._peek_names: set[str] = set(flags["auto_hide_peek"])
+        self.peek_height: int = flags["auto_hide_peek_height"] or bar_widget.dimensions["height"]
+        self._peek_hidden: list[QWidget] = []
+        self._motion = BarMotion(bar_widget, self._peek_targets, self._apply_visuals)
         self._detection_zone_height = 1
         self._detection_zone: AutoHideZone | None = None
         self._hide_timer: QTimer | None = None
+        self._show_timer: QTimer | None = None
         self._is_enabled = False
 
     def setup_autohide(self):
@@ -283,19 +298,28 @@ class AutoHideManager(QObject):
         # Set fixed 1px detection zone height
         self._detection_zone_height = 1
 
-        # Create detection zone
-        self._detection_zone = AutoHideZone(self.bar_widget)
+        # A peeking bar never leaves the screen, so it is its own trigger
+        if not self._peek_names:
+            self._detection_zone = AutoHideZone(self.bar_widget)
 
         # Create hide timer
         self._hide_timer = QTimer(self.bar_widget)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide_bar)
 
+        self._show_timer = QTimer(self.bar_widget)
+        self._show_timer.setSingleShot(True)
+        self._show_timer.timeout.connect(self._reveal)
+
         # Install event filter on the bar
         self.bar_widget.installEventFilter(self)
+        if self._peek_names:
+            self._motion.start_polling()
+            self._watch_motion_trigger()
 
-        # Remove reserved screen space when autohide is enabled
-        if hasattr(self.bar_widget, "app_bar_manager") and self.bar_widget.app_bar_manager:
+        # Remove reserved screen space; a bar hiding on fullscreen keeps its AppBar, the only source of fullscreen notices
+        hides_on_fullscreen = getattr(self.bar_widget, "_hide_on_fullscreen", False)
+        if not hides_on_fullscreen and hasattr(self.bar_widget, "app_bar_manager") and self.bar_widget.app_bar_manager:
             try:
                 SystrayAppBarHelper.execute_without_systray_interference(
                     lambda: self.bar_widget.app_bar_manager.remove_appbar()
@@ -309,23 +333,19 @@ class AutoHideManager(QObject):
     def setup_detection_zone(self):
         """Position and configure the autohide detection zone"""
         screen = self.bar_widget.screen()
-        if not self._is_enabled or not self._detection_zone or screen is None:
+        if not self._is_enabled or screen is None:
             return
 
-        screen_geometry = screen.geometry()
-        alignment = self.bar_widget.alignment
+        if self._detection_zone:
+            screen_geometry = screen.geometry()
+            zone_x = screen_geometry.x() + round(screen_geometry.width() * self._zone_start)
+            zone_width = round(screen_geometry.width() * (self._zone_end - self._zone_start))
 
-        if alignment["position"] == "top":
-            self._detection_zone.setGeometry(
-                screen_geometry.x(), screen_geometry.y(), screen_geometry.width(), self._detection_zone_height
-            )
-        else:
-            self._detection_zone.setGeometry(
-                screen_geometry.x(),
-                screen_geometry.y() + screen_geometry.height() - self._detection_zone_height,
-                screen_geometry.width(),
-                self._detection_zone_height,
-            )
+            if self.bar_widget.alignment["position"] == "top":
+                zone_y = screen_geometry.y()
+            else:
+                zone_y = screen_geometry.y() + screen_geometry.height() - self._detection_zone_height
+            self._detection_zone.setGeometry(zone_x, zone_y, zone_width, self._detection_zone_height)
 
         self.restart_hide_timer()
 
@@ -333,10 +353,111 @@ class AutoHideManager(QObject):
         if self._hide_timer:
             self._hide_timer.start(self._autohide_delay)
 
+    def request_show(self) -> None:
+        """Reveal the bar once the cursor has rested on its trigger for the show delay."""
+        # A pointer coming back to a bar already collapsing is no accident, so it reverses at once
+        if self._show_delay and self._show_timer and not self._motion.is_collapsing():
+            self._show_timer.start(self._show_delay)
+        else:
+            self._reveal()
+
+    def cancel_show(self) -> None:
+        if self._show_timer:
+            self._show_timer.stop()
+
+    def _reveal(self) -> None:
+        # The trigger strip stays on top of a fullscreen app, so a touch on the edge must not bring the bar over it
+        if AppBarManager().is_behind_fullscreen(int(self.bar_widget.winId())):
+            return
+        if self._peek_names:
+            self.expand()
+        else:
+            self.show_bar()
+
     def show_bar(self):
         """Show the bar when mouse hovers over detection zone"""
         if not self.bar_widget.isVisible() and self._is_enabled:
             self.bar_widget.show()
+
+    def is_peeking(self) -> bool:
+        """Whether the bar is collapsed to its peek widgets."""
+        return bool(self._peek_hidden)
+
+    def is_animating(self) -> bool:
+        """Whether a hover expand or collapse is still moving."""
+        return self._motion.active
+
+    def finish_motion(self) -> None:
+        self._motion.finish()
+
+    def collapse(self, animate: bool = True) -> None:
+        """Hide every widget not listed in auto_hide_peek and shrink the bar to the peek height."""
+        if self.is_peeking():
+            return
+        self._peek_hidden = self._peek_targets()
+        self._run(False, list(self._peek_hidden), animate)
+
+    def expand(self, animate: bool = True) -> None:
+        """Bring back the widgets collapse() hid and restore the full bar height."""
+        if not self.is_peeking():
+            return
+        hidden, self._peek_hidden = self._peek_hidden, []
+        self._run(True, hidden, animate)
+
+    def _watch_motion_trigger(self) -> None:
+        """Debug aid: with YASB_MOTION_TRIGGER set to a file path, a file holding "expand" or "collapse" runs it."""
+        path = os.environ.get("YASB_MOTION_TRIGGER")
+        if not path:
+            return
+        timer = QTimer(self.bar_widget)
+
+        def poll() -> None:
+            if not os.path.exists(path):
+                return
+            with open(path, encoding="utf-8") as trigger:
+                command = trigger.read().strip()
+            os.remove(path)
+            if command == "expand":
+                self.expand()
+            elif command == "collapse":
+                self.collapse()
+
+        timer.timeout.connect(poll)
+        timer.start(10)
+
+    def _peek_targets(self) -> list[QWidget]:
+        """The widgets the peek bar hides: those the user switched off from the context menu stay hidden either way."""
+        if self.is_peeking():
+            return list(self._peek_hidden)
+        return [
+            widget
+            for widgets in self.bar_widget.widgets.values()
+            for widget in widgets
+            if widget.widget_name not in self._peek_names and not widget.isHidden()
+        ]
+
+    def _apply_visuals(self, peeking: bool, hidden: list[QWidget]) -> None:
+        for widget in hidden:
+            widget.hide() if peeking else widget.show()
+        self._set_peek_class(peeking)
+
+    def _run(self, expanding: bool, hidden: list[QWidget], animate: bool) -> None:
+        if animate:
+            self._motion.run(expanding, hidden)
+            return
+        self._motion.finish()
+        self._motion.apply_now(not expanding, hidden)
+        self.bar_widget.position_bar()
+
+    def _set_peek_class(self, peeking: bool) -> None:
+        """Mark the collapsed bar with a 'peek' class so stylesheets can size it apart from the full bar."""
+        frame = self.bar_widget.bar_frame
+        classes = [name for name in str(frame.property("class")).split() if name != "peek"]
+        if peeking:
+            classes.append("peek")
+        frame.setProperty("class", " ".join(classes))
+        # Re-polishing widget by widget leaves the paddings of widgets shown in both states on the other state's values
+        self.bar_widget.setStyleSheet(self.bar_widget.styleSheet())
 
     def _is_child_of_bar(self, widget: QObject | None) -> bool:
         """Walk parent chain to check if widget belongs to this bar."""
@@ -375,6 +496,9 @@ class AutoHideManager(QObject):
             if self._should_stay_visible():
                 self.restart_hide_timer()
                 return
+            if self._peek_names:
+                self.collapse()
+                return
             self.bar_widget.hide()
             if self._detection_zone:
                 self._detection_zone.show()
@@ -387,7 +511,10 @@ class AutoHideManager(QObject):
             if a1.type() == QEvent.Type.Enter:
                 if self._hide_timer:
                     self._hide_timer.stop()
+                if self.is_peeking():
+                    self.request_show()
             elif a1.type() == QEvent.Type.Leave:
+                self.cancel_show()
                 cursor_pos = QCursor.pos()
                 bar_geometry = self.bar_widget.geometry()
 
@@ -428,6 +555,9 @@ class AutoHideManager(QObject):
         """Clean up resources"""
         if self._hide_timer:
             self._hide_timer.stop()
+        self.cancel_show()
+        self._motion.stop()
+        self.expand(animate=False)
         if self._detection_zone:
             self._detection_zone.hide()
             self._detection_zone.deleteLater()
@@ -543,6 +673,10 @@ class AppBarManager(QAbstractNativeEventFilter):
         self._bars.pop(hwnd, None)
         self._bar_intended_state.pop(hwnd, None)
 
+    def is_behind_fullscreen(self, hwnd: int) -> bool:
+        """Whether hide_on_fullscreen has sent this bar behind a fullscreen app."""
+        return not self._bar_intended_state.get(hwnd, True)
+
     def suppress(self):
         """Temporarily suppress WM_TASKBARCREATED handling.
         Used when our own code broadcasts TaskbarCreated (e.g. systray init)."""
@@ -597,7 +731,7 @@ class AppBarManager(QAbstractNativeEventFilter):
             fullscreen = getattr(bw, "_hide_on_fullscreen", False)
             if not app_bar and not fullscreen:
                 continue
-            if bw.autohide_manager and bw.autohide_manager.is_enabled():
+            if bw.autohide_manager and bw.autohide_manager.is_enabled() and not fullscreen:
                 continue
             bars_to_reregister.append((bw, app_bar))
             if app_bar:
@@ -1124,6 +1258,7 @@ class AutoWidthManager(QObject):
 
     def update(self) -> int:
         """Calculate current auto width from the layout size hint. Returns the new width."""
+        self.bar_widget.balance_sections()
         layout = self.bar_widget.bar_frame.layout()
         if layout:
             layout.activate()
@@ -1147,7 +1282,7 @@ class AutoWidthManager(QObject):
         if new_width < 0:
             return
 
-        bar_height = self.bar_widget.dimensions["height"]
+        bar_height = self.bar_widget.bar_height
         screen_geometry = self.bar_widget.target_screen.geometry()
         bar_x, bar_y = self.bar_widget.bar_pos(
             new_width,
@@ -1158,6 +1293,7 @@ class AutoWidthManager(QObject):
 
         self.bar_widget.bar_frame.setGeometry(0, 0, new_width, bar_height)
         self.bar_widget.setGeometry(bar_x, bar_y, new_width, bar_height)
+        self.bar_widget.sync_below_strip()
 
     def sync(self) -> None:
         """Ensure auto width matches the layout after a DPI/geometry change."""
@@ -1166,6 +1302,61 @@ class AutoWidthManager(QObject):
 
         if new_width != previous_width or self.bar_widget.width() != new_width:
             self.apply(new_width)
+
+
+class BelowStrip(QWidget):
+    """A click-through window that hangs the widgets in widgets.below under the bar's center section."""
+
+    GAP = 3
+
+    def __init__(self, bar_widget: Bar, widgets: list[BaseWidget], stylesheet: str):
+        super().__init__()
+        self.bar_widget = bar_widget
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.WindowTransparentForInput
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setStyleSheet(stylesheet)
+
+        frame = QFrame(self)
+        frame.setProperty("class", f"bar-below {bar_widget.config.class_name}")
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        for widget in widgets:
+            widget.parent_layout_type = "below"
+            widget.bar_id = bar_widget.bar_id
+            row.addWidget(widget)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(frame)
+
+    def sync(self) -> None:
+        """Center the strip under the center section while the bar shows in full; hide it otherwise."""
+        bar = self.bar_widget
+        center = bar.section_frame("center")
+        peeking = bar.autohide_manager is not None and bar.autohide_manager.is_peeking()
+        if not bar.isVisible() or peeking or center is None:
+            self.hide()
+            return
+        self.place(bar.geometry(), center.mapToGlobal(center.rect().center()).x())
+        self.show()
+
+    def place(self, bar_rect: QRect, center_x: int) -> None:
+        """Hang the strip centered on center_x, just outside the edge of bar_rect that faces the screen's middle."""
+        self.adjustSize()
+        x = center_x - self.width() // 2
+        if self.bar_widget.alignment["position"] == "top":
+            y = bar_rect.bottom() + 1 + self.GAP
+        else:
+            y = bar_rect.top() - self.height() - self.GAP
+        self.move(x, y)
 
 
 class BarCliManager(QObject):

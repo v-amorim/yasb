@@ -43,7 +43,7 @@ from winrt.windows.ui.notifications import ToastNotification, ToastNotificationM
 
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
-from core.utils.win32.backdrop import enable_blur
+from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
 from core.utils.win32.registry_keys import APP_USER_MODEL_ID_KEY
 
 if TYPE_CHECKING:
@@ -177,6 +177,7 @@ class PopupWidget(QWidget):
         persistent: bool = False,
         pinnable: bool = False,
         animation: int = 80,
+        bar_anchored: bool = False,
     ):
         super().__init__(parent)
 
@@ -199,6 +200,7 @@ class PopupWidget(QWidget):
         self._parent = parent
         self._suspend_close = False
         self._pinnable = pinnable
+        self._bar_anchored = bar_anchored
         self._pinned = False
         self._drag_pos = None
         # Create the inner frame
@@ -218,7 +220,12 @@ class PopupWidget(QWidget):
         return result
 
     def setPosition(
-        self, alignment: str = "left", direction: str = "down", offset_left: int = 0, offset_top: int = 0
+        self,
+        alignment: str = "left",
+        direction: str = "down",
+        offset_left: int = 0,
+        offset_top: int = 0,
+        anchor: QWidget | None = None,
     ) -> None:
         """
         Position the popup relative to its parent widget.
@@ -227,14 +234,19 @@ class PopupWidget(QWidget):
             direction (str): Whether popup appears above ('up') or below ('down') the parent
             offset_left (int): Horizontal offset in pixels
             offset_top (int): Vertical offset in pixels
+            anchor (QWidget | None): Widget to align to instead of the parent
         """
         # store the arguments for later use
         # this is needed to reposition the popup when resized
-        self._pos_args = (alignment, direction, offset_left, offset_top)
+        self._pos_args = (alignment, direction, offset_left, offset_top, anchor)
 
-        parent = cast(QWidget, self.parent())  # parent should be a QWidget
+        if self._bar_anchored and anchor is None:
+            anchor = self._bar_frame()
+        parent = anchor or cast(QWidget, self.parent())  # parent should be a QWidget
         if not parent:
             return
+        if self._bar_anchored and anchor is not None and self.minimumWidth() != anchor.width():
+            self.setMinimumWidth(anchor.width())
 
         widget_global_pos = parent.mapToGlobal(QPoint(offset_left, parent.height() + offset_top))
 
@@ -263,6 +275,15 @@ class PopupWidget(QWidget):
             y = max(screen_geometry.top(), min(global_position.y(), screen_geometry.bottom() - self.height()))
             global_position = QPoint(x, y)
         self.move(global_position)
+        self._sync_content_frame()
+
+    def _sync_content_frame(self) -> None:
+        # A stylesheet min-width resizes the window without a resize event reaching us, so the frame can lag behind
+        self._popup_content.setGeometry(self.rect())
+
+    def _bar_frame(self) -> QWidget | None:
+        frame = getattr(self._parent.window(), "bar_frame", None)
+        return frame if isinstance(frame, QWidget) and is_valid_qobject(frame) else None
 
     def set_pinned(self, pinned: bool) -> None:
         """Toggle the pinned state. Only meaningful when pinnable=True.
@@ -429,6 +450,7 @@ class PopupWidget(QWidget):
         clear_hover_state = getattr(self._parent, "clear_hover_state", None)
         if callable(clear_hover_state):
             clear_hover_state()
+        self._mark_parent_open(True)
 
         if self._blur:
             enable_blur(
@@ -438,6 +460,10 @@ class PopupWidget(QWidget):
                 RoundCornersType=self._round_corners_type,
                 BorderColor=self._border_color,
             )
+        elif self._bar_anchored and not is_windows_10():
+            disable_round_corners(self.winId())
+        elif self._round_corners and not is_windows_10():
+            enable_round_corners(self.winId(), self._round_corners_type, self._border_color)
 
         # Reset closing state and stop any ongoing fade animation
         self._is_closing = False
@@ -451,6 +477,7 @@ class PopupWidget(QWidget):
         self.setWindowOpacity(0.0)
 
         super().showEvent(a0)
+        self._sync_content_frame()
 
         self.activateWindow()
         self._fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -506,17 +533,46 @@ class PopupWidget(QWidget):
         app = QApplication.instance()
         if self._is_closing and app is not None:
             app.removeEventFilter(self)
+        self._mark_parent_open(False)
 
         super().hideEvent(a0)
 
+    def _mark_parent_open(self, is_open: bool) -> None:
+        """Give the bar widget's container a popup-open class while its popup shows, so it can look pressed."""
+        if self._bar_anchored:
+            frame = self._bar_frame()
+            if frame is not None:
+                self._set_popup_open_class(frame, is_open)
+            self._fit_bar_to_popup(is_open)
+        container = getattr(self._parent, "_widget_container", None)
+        if not isinstance(container, QFrame) or not is_valid_qobject(container):
+            return
+        self._set_popup_open_class(container, is_open)
+        refresh_widget_style(container, *container.findChildren(QLabel))
+
+    def _fit_bar_to_popup(self, is_open: bool) -> None:
+        """Widen the bar to this popup's width while it shows, so both read as one shape with flush edges."""
+        widen = getattr(self._parent.window(), "widen_for_popup", None)
+        if not callable(widen):
+            return
+        widen(self, self.width() if is_open else None)
+        if is_open and hasattr(self, "_pos_args"):
+            self.setPosition(*self._pos_args)
+
+    @staticmethod
+    def _set_popup_open_class(widget: QWidget, is_open: bool) -> None:
+        classes = [name for name in str(widget.property("class") or "").split() if name != "popup-open"]
+        widget.setProperty("class", " ".join([*classes, "popup-open"] if is_open else classes))
+        refresh_widget_style(widget)
+
     @override
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
-        # reset geometry
-        self._popup_content.setGeometry(0, 0, self.width(), self.height())
+        self._sync_content_frame()
+        if self._bar_anchored and self.isVisible() and not self._is_closing:
+            self._fit_bar_to_popup(True)
         # reposition if we've already called setPosition()
         if hasattr(self, "_pos_args"):
-            alignment, direction, offset_left, offset_top = self._pos_args
-            self.setPosition(alignment, direction, offset_left, offset_top)
+            self.setPosition(*self._pos_args)
 
         super().resizeEvent(a0)
 

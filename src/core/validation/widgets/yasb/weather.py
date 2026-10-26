@@ -59,8 +59,12 @@ class WeatherCardConfig(CustomBaseModel):
     alignment: str = "right"
     direction: str = "down"
     offset_top: int = 6
+    anchor: Literal["widget", "bar"] = "widget"
     offset_left: int = 0
     icon_size: int = 64
+    # columns: the three days side by side; rows: a now header over one row per day (no hourly forecast)
+    # chart: now and an hourly rain and temperature chart on top, the three days as tiles below
+    layout: Literal["columns", "rows", "chart"] = "columns"
     show_hourly_forecast: bool = False
     time_format: Literal["12h", "24h"] = "24h"
     hourly_point_spacing: int = 76

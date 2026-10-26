@@ -24,12 +24,34 @@ class BarAnimation(CustomBaseModel):
     type: Literal["slide", "fade"] = "slide"
 
 
+def auto_hide_zone_bounds(zone: str) -> tuple[float, float]:
+    """Turn a zone like '45%-55%' into start and end fractions of the screen width."""
+    start, _, end = zone.partition("-")
+    return float(start.strip().removesuffix("%")) / 100, float(end.strip().removesuffix("%")) / 100
+
+
 class BarWindowFlags(CustomBaseModel):
     always_on_top: bool = False
     windows_app_bar: bool = False
     hide_on_fullscreen: bool = False
     hide_on_maximized: bool = False
     auto_hide: bool = False
+    auto_hide_peek: list[str] = []
+    auto_hide_peek_height: int | None = Field(default=None, ge=0)
+    auto_hide_show_delay: int = Field(default=0, ge=0)
+    auto_hide_hide_delay: int = Field(default=600, ge=0)
+    auto_hide_zone: str = "0%-100%"
+
+    @field_validator("auto_hide_zone")
+    @classmethod
+    def validate_auto_hide_zone(cls, v: str) -> str:
+        try:
+            start, end = auto_hide_zone_bounds(v)
+        except ValueError:
+            start, end = 1.0, 0.0
+        if not 0 <= start < end <= 1:
+            raise ValueError("auto_hide_zone must be a range of the screen width like '45%-55%'")
+        return v
 
 
 class BarDimensions(CustomBaseModel):
@@ -61,6 +83,7 @@ class BarWidgets(CustomBaseModel):
     left: list[str] = []
     center: list[str] = []
     right: list[str] = []
+    below: list[str] = []
 
 
 class BarLayout(CustomBaseModel):
@@ -72,6 +95,7 @@ class BarLayouts(CustomBaseModel):
     left: BarLayout = BarLayout(alignment="left")
     center: BarLayout = BarLayout(alignment="center")
     right: BarLayout = BarLayout(alignment="right")
+    balanced: bool = False
 
 
 class BarConfig(CustomBaseModel):

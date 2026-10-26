@@ -68,6 +68,9 @@ user32.MonitorFromWindow.restype = HMONITOR
 user32.MonitorFromRect.argtypes = [POINTER(RECT), DWORD]
 user32.MonitorFromRect.restype = HMONITOR
 
+user32.SystemParametersInfoW.argtypes = [UINT, UINT, LPVOID, UINT]
+user32.SystemParametersInfoW.restype = BOOL
+
 user32.GetMonitorInfoW.argtypes = [HMONITOR, POINTER(MONITORINFO)]
 user32.GetMonitorInfoW.restype = BOOL
 
@@ -395,6 +398,14 @@ user32.CloseClipboard.restype = BOOL
 
 def MonitorFromWindow(hwnd: int, dwFlags: int = 0) -> int | None:
     return user32.MonitorFromWindow(hwnd, dwFlags)
+
+
+def SystemParametersInfoBool(action: int) -> bool | None:
+    """A boolean system setting such as SPI_GETCLIENTAREAANIMATION, or None when Windows refuses."""
+    flag = BOOL()
+    if not user32.SystemParametersInfoW(action, 0, byref(flag), 0):
+        return None
+    return bool(flag.value)
 
 
 def MonitorFromRect(rect: tuple[int, int, int, int], dwFlags: int = 0) -> int | None:

@@ -4,7 +4,10 @@ from PyQt6.QtCore import QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, 
 from PyQt6.QtGui import QCloseEvent, QCursor, QHideEvent, QResizeEvent, QShowEvent
 from PyQt6.QtWidgets import QApplication, QFrame, QPushButton, QVBoxLayout, QWidget
 
-from core.utils.win32.backdrop import enable_blur
+from core.utils.qobject import is_valid_qobject
+from core.utils.system import is_windows_10
+from core.utils.utilities import PopupWidget
+from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
 from core.utils.win32.bindings.user32 import GetAsyncKeyState
 from core.validation.widgets.yasb.systray import SystrayPopupConfig
 from core.widgets.services.systray.systray_widget import DropWidget, IconWidget
@@ -47,6 +50,7 @@ class SystrayPopup(QWidget):
         self._round_corners = popup_config.round_corners
         self._round_corners_type = popup_config.round_corners_type
         self._border_color = popup_config.border_color
+        self._bar_anchored = popup_config.anchor == "bar"
         self._is_closing = False
         self._pos_args: tuple[str, str, int, int] | None = None
 
@@ -128,23 +132,26 @@ class SystrayPopup(QWidget):
         if parent is None:
             return
 
-        # Vertical offset from bar (parent), same as other popup widgets
-        # Horizontal align relative to the toggle button
-        # We need to mess with this because we want to center the popup below the button.
-        btn_origin = btn.mapToGlobal(QPoint(0, 0))
-        bar_origin = parent.mapToGlobal(QPoint(0, 0))
+        # Aligns to the toggle button, or to the bar frame when bar-anchored.
+        frame = self._bar_frame()
+        target = frame if frame is not None else btn
+        if frame is not None and self.minimumWidth() != frame.width():
+            self.setMinimumWidth(frame.width())
+        target_origin = target.mapToGlobal(QPoint(0, 0))
+        bar_origin = (frame if frame is not None else parent).mapToGlobal(QPoint(0, 0))
+        bar_height = (frame if frame is not None else parent).height()
 
         if direction == "up":
             y = bar_origin.y() - self.height() - offset_top
         else:
-            y = bar_origin.y() + parent.height() + offset_top
+            y = bar_origin.y() + bar_height + offset_top
 
-        x = btn_origin.x() + offset_left
+        x = target_origin.x() + offset_left
 
         if alignment == "right":
-            x = btn_origin.x() + btn.width() - self.width() + offset_left
+            x = target_origin.x() + target.width() - self.width() + offset_left
         elif alignment == "center":
-            x = btn_origin.x() + (btn.width() - self.width()) // 2 + offset_left
+            x = target_origin.x() + (target.width() - self.width()) // 2 + offset_left
 
         screen = QApplication.screenAt(btn.mapToGlobal(btn.rect().center()))
         if screen:
@@ -153,6 +160,17 @@ class SystrayPopup(QWidget):
             y = max(sg.top(), min(y, sg.bottom() - self.height()))
 
         self.move(QPoint(x, y))
+
+    def _bar_frame(self) -> QWidget | None:
+        if not self._bar_anchored or self.parentWidget() is None:
+            return None
+        frame = getattr(self.parentWidget().window(), "bar_frame", None)
+        return frame if isinstance(frame, QWidget) and is_valid_qobject(frame) else None
+
+    def _mark_bar_open(self, is_open: bool) -> None:
+        frame = self._bar_frame()
+        if frame is not None:
+            PopupWidget._set_popup_open_class(frame, is_open)
 
     @override
     def setProperty(self, name: str | None, value: object) -> bool:
@@ -175,6 +193,11 @@ class SystrayPopup(QWidget):
                 RoundCornersType=self._round_corners_type,
                 BorderColor=self._border_color,
             )
+        elif self._bar_anchored and not is_windows_10():
+            disable_round_corners(self.winId())
+        elif self._round_corners and not is_windows_10():
+            enable_round_corners(self.winId(), self._round_corners_type, self._border_color)
+        self._mark_bar_open(True)
 
         self._is_closing = False
         try:
@@ -223,6 +246,7 @@ class SystrayPopup(QWidget):
     def hideEvent(self, a0: QHideEvent | None) -> None:
         event = a0
         self._watch_timer.stop()
+        self._mark_bar_open(False)
         super().hideEvent(event)
         self.closed.emit()
 

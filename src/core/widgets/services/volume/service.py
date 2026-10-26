@@ -280,8 +280,9 @@ class AudioOutputService(QObject):
         self,
         get_app_name_callback: Callable[[int], str | None] | None = None,
         format_name_callback: Callable[[str], str] | None = None,
+        system_sounds_label: str | None = None,
     ) -> list[AudioSessionInfo]:
-        """Get running apps with audio, excluding system processes."""
+        """Get running apps with audio, excluding system processes; a system_sounds_label adds the system sounds session first."""
         sessions: list[AudioSessionInfo] = []
         seen: dict[tuple[int, str], bool] = {}
 
@@ -292,6 +293,17 @@ class AudioOutputService(QObject):
             for session in self.get_all_sessions():
                 process = session.Process
                 if not process or not process.name():
+                    # The system sounds session belongs to no process
+                    if system_sounds_label and session.ProcessId == 0 and not any(s["pid"] == 0 for s in sessions):
+                        sessions.append(
+                            {
+                                "name": system_sounds_label,
+                                "app_name": system_sounds_label,
+                                "volume_interface": session.SimpleAudioVolume,
+                                "session": session,
+                                "pid": 0,
+                            }
+                        )
                     continue
 
                 proc_name = process.name()
@@ -338,7 +350,7 @@ class AudioOutputService(QObject):
         except Exception:
             pass
 
-        sessions.sort(key=lambda s: s["app_name"].lower())
+        sessions.sort(key=lambda s: (s["pid"] != 0, s["app_name"].lower()))
         return sessions
 
 

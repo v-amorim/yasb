@@ -10,6 +10,13 @@ from core.validation.widgets.base_model import (
 )
 
 
+class BrightnessPresetConfig(CustomBaseModel):
+    name: str
+    icon: str = ""
+    brightness: int = Field(ge=0, le=100)
+    contrast: int | None = Field(default=None, ge=0, le=100)
+
+
 class BrightnessMenuConfig(CustomBaseModel):
     blur: bool = True
     round_corners: bool = True
@@ -18,9 +25,15 @@ class BrightnessMenuConfig(CustomBaseModel):
     alignment: str = "right"
     direction: str = "down"
     offset_top: int = 6
+    anchor: Literal["widget", "bar"] = "widget"
     offset_left: int = 0
     contrast_icon: str = "\ue7a1"
     brightness_icon: str = "\ue706"
+    slider_style: Literal["default", "fill"] = "default"
+    brightness_label: str = "Brightness"
+    contrast_label: str = "Contrast"
+    presets: list[BrightnessPresetConfig] = []
+    presets_columns: int = Field(default=2, ge=1, le=6)
 
 
 class BrightnessProgressBarConfig(CustomBaseModel):

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import ClassVar, override
 
 from PyQt6.QtCore import (
+    QEvent,
     QMimeData,
     QPoint,
     QSize,
@@ -20,6 +21,8 @@ from PyQt6.QtGui import (
     QDropEvent,
     QIcon,
     QMouseEvent,
+    QPainter,
+    QPaintEvent,
     QPixmap,
 )
 from PyQt6.QtWidgets import (
@@ -27,7 +30,9 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QPushButton,
+    QSizePolicy,
     QWidget,
 )
 
@@ -52,7 +57,7 @@ from core.utils.win32.constants import (
     WM_RBUTTONUP,
 )
 from core.widgets.services.systray.systray_monitor import IconData
-from core.widgets.services.systray.utils import pack_i32
+from core.widgets.services.systray.utils import pack_i32, tray_icon_name
 
 
 @dataclass
@@ -68,6 +73,36 @@ class IconState:
         return state
 
 
+GRID_GAP = 6
+TILE_PADDING = 10
+TILE_GAP = 8
+TILE_HINT_WIDTH = 150
+
+
+class ElidedLabel(QLabel):
+    """A label that cuts its text with an ellipsis to the width it gets, and never asks for more."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    @override
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
+
+    def elided_text(self) -> str:
+        return self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, self.width())
+
+    @override
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        painter = QPainter(self)
+        painter.setPen(self.palette().windowText().color())
+        painter.drawText(
+            self.rect(), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), self.elided_text()
+        )
+        painter.end()
+
+
 class IconWidget(QPushButton):
     pinned_changed = pyqtSignal(object)
     icon_moved = pyqtSignal(object)
@@ -78,6 +113,11 @@ class IconWidget(QPushButton):
 
     def __init__(self) -> None:
         super().__init__()
+        self.name = ""
+        self.tile_mode = False
+        self._icon = QIcon()
+        self._tile_icon: QLabel | None = None
+        self._tile_name: ElidedLabel | None = None
         self.data: IconData | None = None
         self.last_cursor_pos = QPoint()
         self.setProperty("class", "button")
@@ -218,14 +258,66 @@ class IconWidget(QPushButton):
         SendNotifyMessage(self.data.hWnd, self.data.uCallbackMessage, wparam, lparam)
 
     def update_icon(self) -> None:
-        """Update the icon and tooltip of the icon widget"""
+        """Update the icon, tooltip and tile name of the icon widget"""
         if not self.data or self.data.hIcon == 0:
             return
         if self.enable_tooltips:
             set_tooltip(self, self.data.szTip or self.data.exe, delay=50)
         icon = self.data.icon_image
         if icon:
-            self.setIcon(QIcon(QPixmap.fromImage(icon)))
+            self._icon = QIcon(QPixmap.fromImage(icon))
+        self.name = tray_icon_name(self.data.szTip, self.data.exe_path, self.data.exe)
+        self._apply_look()
+
+    @override
+    def event(self, e: QEvent | None) -> bool:
+        if e is not None and e.type() == QEvent.Type.ParentChange:
+            parent = self.parentWidget()
+            self.set_tile_mode(isinstance(parent, DropWidget) and parent.is_grid)
+        return super().event(e)
+
+    @override
+    def sizeHint(self) -> QSize:
+        if not self.tile_mode:
+            return super().sizeHint()
+        return QSize(TILE_HINT_WIDTH, super().sizeHint().height())
+
+    @override
+    def minimumSizeHint(self) -> QSize:
+        if not self.tile_mode:
+            return super().minimumSizeHint()
+        return QSize(0, super().minimumSizeHint().height())
+
+    def set_tile_mode(self, enabled: bool) -> None:
+        """Tile mode shows the app name beside the icon (popup grid); otherwise the bare icon button."""
+        if enabled == self.tile_mode:
+            return
+        self.tile_mode = enabled
+        if enabled and self._tile_icon is None:
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(TILE_PADDING, 0, TILE_PADDING, 0)
+            layout.setSpacing(TILE_GAP)
+            self._tile_icon = QLabel()
+            self._tile_icon.setFixedSize(self.icon_size, self.icon_size)
+            self._tile_name = ElidedLabel()
+            self._tile_name.setProperty("class", "systray-tile-name")
+            for label in (self._tile_icon, self._tile_name):
+                label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                layout.addWidget(label)
+        for label in (self._tile_icon, self._tile_name):
+            if label is not None:
+                label.setVisible(enabled)
+        self._apply_look()
+        self.updateGeometry()
+
+    def _apply_look(self) -> None:
+        if self.tile_mode and self._tile_icon is not None and self._tile_name is not None:
+            self.setIcon(QIcon())
+            self._tile_icon.setPixmap(self._icon.pixmap(self.icon_size, self.icon_size))
+            self._tile_name.setText(self.name)
+            self._tile_name.update()
+        else:
+            self.setIcon(self._icon)
 
 
 class DropWidget(QFrame):
@@ -245,12 +337,16 @@ class DropWidget(QFrame):
             self.main_layout = QHBoxLayout(self)
             self.setMaximumHeight(32)
 
-        self.main_layout.setSpacing(0)
+        self.main_layout.setSpacing(GRID_GAP if grid_cols > 0 else 0)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(self.main_layout)
 
         self.dragged_button: IconWidget | None = None
         self._hover_btn: IconWidget | None = None
+
+    @property
+    def is_grid(self) -> bool:
+        return self._grid_cols > 0
 
     @staticmethod
     def _set_class(widget: QWidget, name: str, add: bool) -> None:
@@ -420,12 +516,12 @@ class DropWidget(QFrame):
             if icon.isHidden():
                 # Placing them at the current visible index cell does not mess up the visible order
                 layout.addWidget(icon, visible_idx // cols, visible_idx % cols)
-                layout.setAlignment(icon, Qt.AlignmentFlag.AlignCenter)
                 continue
             layout.addWidget(icon, visible_idx // cols, visible_idx % cols)
-            layout.setAlignment(icon, Qt.AlignmentFlag.AlignCenter)
             icon.show()
             visible_idx += 1
+        for c in range(cols):
+            layout.setColumnStretch(c, 1)
         layout.invalidate()
 
     def _get_all_icons(self) -> list[IconWidget]:

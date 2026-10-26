@@ -226,6 +226,21 @@ Customize how the status bar transitions when shown or hidden:
 | `hide_on_fullscreen` | boolean | `false`    | Whether the status bar should hide when a window is in fullscreen mode. |
 | `hide_on_maximized` | boolean | `false`    | Whether the status bar should auto-hide when any window is maximized on the bar's monitor. Only works when `windows_app_bar` is `false`. |
 | `auto_hide` | boolean | `false`    | Whether the status bar should auto-hide when not in use. |
+| `auto_hide_hide_delay` | integer | `600` | Milliseconds the bar stays after the cursor leaves it. |
+| `auto_hide_show_delay` | integer | `0` | Milliseconds the cursor must rest on the trigger before the bar shows. Moving away earlier cancels it, so passing over the edge does not open the bar. |
+| `auto_hide_zone` | string | `"0%-100%"` | The part of the screen edge that shows the bar, as a range of the screen width, e.g. `"45%-55%"` for the middle tenth. |
+| `auto_hide_peek` | list | `[]` | Widget names that stay on screen while the bar is hidden. When set, the bar never leaves the screen: it collapses to these widgets and grows back when the cursor rests on it. While collapsed, the bar frame has the `peek` class, so `.bar.peek` can style it apart from the full bar. The bar grows and collapses with a short animation when `animation.enabled` is true and Windows animation effects are on; otherwise it jumps. |
+| `auto_hide_peek_height` | integer | bar height | The bar height while collapsed to its peek widgets. |
+
+Example of a bar that rests as a small clock and grows into the full bar:
+```yaml
+window_flags:
+  auto_hide: true
+  auto_hide_peek: ["clock"]
+  auto_hide_peek_height: 24
+  auto_hide_show_delay: 250
+  auto_hide_hide_delay: 400
+```
 
 ### Layouts Configuration
 Each section (left, center, right) can be configured with the following properties:

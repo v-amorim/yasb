@@ -14,6 +14,7 @@ from ctypes.wintypes import (
     MSG,
 )
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
@@ -40,6 +41,7 @@ from core.utils.win32.bindings.user32 import (
     PostMessage,
     user32,
 )
+from core.utils.win32.bindings.version import get_version_strings
 from core.utils.win32.constants import (
     LIST_MODULES_ALL,
     NIF_GUID,
@@ -87,6 +89,29 @@ class IconData:
     icon_image: QImage | None = None
     exe: str = ""
     exe_path: str = ""
+
+
+@lru_cache(maxsize=128)
+def describe_exe(exe_path: str) -> str:
+    """The file description of an exe, or an empty string."""
+    if not exe_path:
+        return ""
+    try:
+        return get_version_strings(exe_path, ("FileDescription",)).get("FileDescription", "")
+    except OSError:
+        return ""
+
+
+def tray_icon_name(tip: str, exe_path: str, exe: str, describe: Callable[[str], str] = describe_exe) -> str:
+    """Name for a tray tile: the tooltip's first line, else the exe's description, else the exe name.
+
+    A tooltip with a digit carries a live value (volume percent, a version, a count) and would change
+    under the tile, so it only wins when no description or exe name exists.
+    """
+    first_line = next((line.strip() for line in tip.splitlines() if line.strip()), "")
+    if first_line and not any(char.isdigit() for char in first_line):
+        return first_line
+    return describe(exe_path) or exe or first_line
 
 
 class NativeWindowEx:

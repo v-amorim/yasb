@@ -10,6 +10,7 @@ from PyQt6.QtGui import QContextMenuEvent, QMouseEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
 from core.events.service import EventService
+from core.utils.ink_balance import InkBalancedFrame
 from core.utils.win32.system_function import function_map
 from core.widgets.registry import register_widget_class
 
@@ -165,7 +166,7 @@ class BaseWidget(QWidget):
         self._widget_container_layout = QHBoxLayout()
         self._widget_container_layout.setSpacing(0)
         self._widget_container_layout.setContentsMargins(0, 0, 0, 0)
-        self._widget_container = QFrame()
+        self._widget_container = InkBalancedFrame()
         self._widget_container.setLayout(self._widget_container_layout)
         self._widget_container.setProperty("class", "widget-container")
         self.widget_layout.addWidget(self._widget_container)

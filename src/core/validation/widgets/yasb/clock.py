@@ -53,6 +53,8 @@ class ClockCallbacksConfig(CallbacksConfig):
 class ClockConfig(CustomBaseModel):
     label: str = "\uf017 {%H:%M:%S}"
     label_alt: str = "\uf017 {%d-%m-%y %H:%M:%S}"
+    # The label while an auto-hide peek bar shows in full; same <span> parts as label
+    label_full: str | None = None
     class_name: str = ""
     update_interval: int = Field(default=1000, ge=0, le=60000)
     locale: str = ""

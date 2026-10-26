@@ -96,6 +96,8 @@ class BarLayouts(CustomBaseModel):
     center: BarLayout = BarLayout(alignment="center")
     right: BarLayout = BarLayout(alignment="right")
     balanced: bool = False
+    # The center section on a top row, the left and right sections side by side on a row under it
+    stacked: bool = False
 
 
 class BarConfig(CustomBaseModel):

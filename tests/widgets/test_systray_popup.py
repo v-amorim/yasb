@@ -1,7 +1,10 @@
 # pyright: reportPrivateUsage=false
 
+from PyQt6.QtCore import QEventLoop, QTimer
 from PyQt6.QtWidgets import QApplication, QFrame, QPushButton, QWidget
 
+from core.utils import floating_popup
+from core.utils.utilities import PopupWidget
 from core.validation.widgets.yasb.systray import SystrayPopupConfig
 from core.widgets.services.systray.systray_popup import SystrayPopup
 from core.widgets.services.systray.systray_widget import DropWidget, IconWidget
@@ -22,19 +25,45 @@ def _bar(qapp: QApplication) -> tuple[QWidget, QFrame, QPushButton]:
     return window, frame, button
 
 
-def test_bar_anchored_popup_hangs_under_the_bar_and_marks_it(qapp: QApplication) -> None:
+def _wait(ms: int) -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+
+def test_bar_anchored_popup_floats_centred_under_the_bar_and_leaves_its_look_alone(qapp: QApplication) -> None:
     window, frame, button = _bar(qapp)
-    config = SystrayPopupConfig(anchor="bar", round_corners=False, alignment="center", offset_top=0)
+    config = SystrayPopupConfig(anchor="bar", round_corners=False, alignment="left", offset_top=0)
     popup = SystrayPopup(button.parentWidget(), button, config, 4)
 
     popup.open("")
+    _wait(floating_popup.DROP_MS + 60)
+
+    assert popup.minimumWidth() == 0
+    assert popup.y() == frame.mapToGlobal(frame.rect().bottomLeft()).y() + 1 + floating_popup.GAP
+    frame_center = frame.mapToGlobal(frame.rect().center()).x()
+    assert abs(popup.mapToGlobal(popup.rect().center()).x() - frame_center) <= 1
+    assert frame.property("class") == "bar"
+    popup.hide()
+    window.deleteLater()
+
+
+def test_opening_another_bar_card_closes_the_open_tray_card(qapp: QApplication) -> None:
+    window, _, button = _bar(qapp)
+    tray = SystrayPopup(button.parentWidget(), button, SystrayPopupConfig(anchor="bar", offset_top=0), 4)
+    volume_item = QWidget(window)
+    volume_item.setGeometry(20, 4, 60, 26)
+    tray.open("")
     qapp.processEvents()
 
-    assert popup.minimumWidth() == frame.width()
-    assert popup.y() == frame.mapToGlobal(frame.rect().bottomLeft()).y() + 1
-    assert frame.property("class") == "bar popup-open"
-    popup.hide()
-    assert frame.property("class") == "bar"
+    volume = PopupWidget(volume_item, bar_anchored=True)
+    volume.resize(200, 80)
+    volume.show()
+    qapp.processEvents()
+
+    assert tray._is_closing, "one floating card at a time"
+    assert not volume._is_closing
+    volume.hide()
     window.deleteLater()
 
 
@@ -57,7 +86,7 @@ def _tile(name: str) -> IconWidget:
     return icon
 
 
-def test_tiles_fill_three_equal_columns_across_the_bar_width(qapp: QApplication) -> None:
+def test_tiles_fill_three_equal_columns(qapp: QApplication) -> None:
     window, frame, button = _bar(qapp)
     popup = SystrayPopup(button.parentWidget(), button, SystrayPopupConfig(anchor="bar", offset_top=0), 3)
     for i in range(7):
@@ -68,7 +97,6 @@ def test_tiles_fill_three_equal_columns_across_the_bar_width(qapp: QApplication)
 
     tiles = popup.grid_widget._get_all_icons()
     assert all(tile.tile_mode for tile in tiles)
-    assert popup.width() == frame.width()
     assert len({tile.width() for tile in tiles}) == 1
     assert tiles[0].x() == tiles[3].x() == tiles[6].x()
     assert tiles[0].x() < tiles[1].x() < tiles[2].x()

@@ -4,9 +4,9 @@ from PyQt6.QtCore import QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, 
 from PyQt6.QtGui import QCloseEvent, QCursor, QHideEvent, QResizeEvent, QShowEvent
 from PyQt6.QtWidgets import QApplication, QFrame, QPushButton, QVBoxLayout, QWidget
 
+from core.utils.floating_popup import DROP_MS, Floating
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
-from core.utils.utilities import PopupWidget
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
 from core.utils.win32.bindings.user32 import GetAsyncKeyState
 from core.validation.widgets.yasb.systray import SystrayPopupConfig
@@ -71,6 +71,10 @@ class SystrayPopup(QWidget):
         self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
         self._fade_animation.setDuration(80)
         self._fade_animation.finished.connect(self._on_animation_finished)
+        self._floating = Floating(self, parent, self._bar_frame) if self._bar_anchored and parent is not None else None
+        if self._floating is not None:
+            self._fade_animation.setDuration(DROP_MS)
+            self._fade_animation.valueChanged.connect(lambda value: self._floating and self._floating.fade(value))
 
         # Watch timer for native mouse-poll (context-menu interaction)
         self._watch_ticks = 0
@@ -126,20 +130,19 @@ class SystrayPopup(QWidget):
         self, alignment: str = "left", direction: str = "down", offset_left: int = 0, offset_top: int = 0
     ) -> None:
         self._pos_args = (alignment, direction, offset_left, offset_top)
+        if self._floating is not None:
+            self._floating.place()
+            return
 
         btn = self._toggle_btn
         parent = self.parentWidget()
         if parent is None:
             return
 
-        # Aligns to the toggle button, or to the bar frame when bar-anchored.
-        frame = self._bar_frame()
-        target = frame if frame is not None else btn
-        if frame is not None and self.minimumWidth() != frame.width():
-            self.setMinimumWidth(frame.width())
+        target = btn
         target_origin = target.mapToGlobal(QPoint(0, 0))
-        bar_origin = (frame if frame is not None else parent).mapToGlobal(QPoint(0, 0))
-        bar_height = (frame if frame is not None else parent).height()
+        bar_origin = parent.mapToGlobal(QPoint(0, 0))
+        bar_height = parent.height()
 
         if direction == "up":
             y = bar_origin.y() - self.height() - offset_top
@@ -167,11 +170,6 @@ class SystrayPopup(QWidget):
         frame = getattr(self.parentWidget().window(), "bar_frame", None)
         return frame if isinstance(frame, QWidget) and is_valid_qobject(frame) else None
 
-    def _mark_bar_open(self, is_open: bool) -> None:
-        frame = self._bar_frame()
-        if frame is not None:
-            PopupWidget._set_popup_open_class(frame, is_open)
-
     @override
     def setProperty(self, name: str | None, value: object) -> bool:
         result = super().setProperty(name, value)
@@ -197,7 +195,6 @@ class SystrayPopup(QWidget):
             disable_round_corners(self.winId())
         elif self._round_corners and not is_windows_10():
             enable_round_corners(self.winId(), self._round_corners_type, self._border_color)
-        self._mark_bar_open(True)
 
         self._is_closing = False
         try:
@@ -207,6 +204,8 @@ class SystrayPopup(QWidget):
             pass
         self.setWindowOpacity(0.0)
         super().showEvent(event)
+        if self._floating is not None:
+            self._floating.drop_in()
         self.activateWindow()
 
         self._fade_animation.setStartValue(0.0)
@@ -246,7 +245,8 @@ class SystrayPopup(QWidget):
     def hideEvent(self, a0: QHideEvent | None) -> None:
         event = a0
         self._watch_timer.stop()
-        self._mark_bar_open(False)
+        if self._floating is not None:
+            self._floating.close()
         super().hideEvent(event)
         self.closed.emit()
 

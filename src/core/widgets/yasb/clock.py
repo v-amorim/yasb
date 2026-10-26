@@ -13,7 +13,7 @@ from typing import NotRequired, TypedDict, cast, override
 from zoneinfo import ZoneInfo, available_timezones
 
 from PyQt6.QtCore import QDate, QLocale, QPoint, QRect, Qt, QTimer
-from PyQt6.QtGui import QAction, QColor, QPainter, QPalette, QShowEvent
+from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPalette, QShowEvent
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -387,7 +387,8 @@ class ClockWidget(BaseWidget):
         self._timezones: Iterator[str | None] = cycle(self._timezones_list)
         self._active_datetime_format_str = ""
         self._active_datetime_format: str | None = None
-        self._label_content = self.config.label
+        # A bar starts in full; an auto-hide peek swaps back to label through on_peek_changed
+        self._label_content = self.config.label_full or self.config.label
         self._calendar = self.config.calendar
         self._label_alt_content = self.config.label_alt
         self._icons = self.config.icons or {}
@@ -400,6 +401,11 @@ class ClockWidget(BaseWidget):
         self._subdivision = self.config.calendar.subdivision
         self._init_container()
         self.build_widget_label(self._label_content, self._label_alt_content)
+        # Tabular figures: every digit one width, so ticking seconds never wiggle the text
+        for label in (*self._widgets, *self._widgets_alt):
+            font = label.font()
+            font.setFeature(QFont.Tag("tnum"), 1)
+            label.setFont(font)
 
         self._timer_label = QLabel()
         self._timer_label.setProperty("class", "label timer")
@@ -519,6 +525,20 @@ class ClockWidget(BaseWidget):
             except locale.Error:
                 pass
 
+    def _is_full_label(self) -> bool:
+        return (
+            bool(self.config.label_full) and not self._show_alt_label and self._label_content == self.config.label_full
+        )
+
+    def on_peek_changed(self, peeking: bool) -> None:
+        """Show label_full while the bar is in full and label while it peeks."""
+        if not self.config.label_full:
+            return
+        self._label_content = self.config.label if peeking else self.config.label_full
+        for label in self._widgets:
+            label.setMinimumWidth(0)
+        self.update_label()
+
     def update_label(self):
         # Choose which label set to update (primary or alternate)
         active_widgets = self._widgets_alt if self._show_alt_label else self._widgets
@@ -620,6 +640,10 @@ class ClockWidget(BaseWidget):
                             format_label_content = part
 
                     active_widgets[widget_index].setText(format_label_content)
+                    if self._is_full_label():
+                        # Grow only, so a narrower second or day name never shifts the row
+                        label = active_widgets[widget_index]
+                        label.setMinimumWidth(max(label.minimumWidth(), label.sizeHint().width()))
 
                     if has_alarm:
                         if self._shared_state.snoozed_alarms:

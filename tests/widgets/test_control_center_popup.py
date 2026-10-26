@@ -1,8 +1,10 @@
 from collections.abc import Iterator
 
 import pytest
+from PyQt6.QtCore import QEventLoop, QTimer
 from PyQt6.QtWidgets import QApplication, QWidget
 
+from core.utils import floating_popup
 from core.validation.widgets.yasb.control_center import ControlCenterConfig
 from core.widgets.yasb.control_center import ControlCenterWidget
 
@@ -16,6 +18,12 @@ def bar(qapp: QApplication) -> Iterator[QWidget]:
     window.show()
     yield window
     window.deleteLater()
+
+
+def _wait(ms: int) -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
 
 
 def _widget(bar: QWidget) -> ControlCenterWidget:
@@ -35,7 +43,11 @@ def _widget(bar: QWidget) -> ControlCenterWidget:
     return widget
 
 
-def test_content_frame_spans_the_popup_when_the_popup_is_wider_than_its_content(
+def _x_center(widget: QWidget) -> int:
+    return widget.mapToGlobal(widget.rect().center()).x()
+
+
+def test_bar_anchored_menu_floats_at_its_own_width_with_the_content_frame_filling_it(
     qapp: QApplication, bar: QWidget
 ) -> None:
     widget = _widget(bar)
@@ -44,18 +56,23 @@ def test_content_frame_spans_the_popup_when_the_popup_is_wider_than_its_content(
     assert dialog is not None
     qapp.processEvents()
 
-    assert dialog.width() == bar.width()
+    assert dialog.width() < bar.width()
     assert dialog._popup_content.geometry() == dialog.rect()
 
 
-def test_content_frame_follows_the_popup_when_the_bar_grows_after_it_opened(qapp: QApplication, bar: QWidget) -> None:
+def test_menu_keeps_its_width_and_recentres_when_the_bar_grows_after_it_opened(
+    qapp: QApplication, bar: QWidget
+) -> None:
     widget = _widget(bar)
     widget._show_menu()
     dialog = widget.dialog
     assert dialog is not None
+    qapp.processEvents()
+    width = dialog.width()
     bar.resize(900, 34)
     dialog.setPosition(*dialog._pos_args)
-    qapp.processEvents()
+    _wait(floating_popup.DROP_MS + 60)
 
-    assert dialog.width() == 900
+    assert dialog.width() == width
+    assert abs(_x_center(dialog) - _x_center(bar)) <= 1
     assert dialog._popup_content.geometry() == dialog.rect()

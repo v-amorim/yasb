@@ -8,6 +8,7 @@ from PyQt6.QtCore import (
     QEvent,
     QObject,
     QPoint,
+    QPointF,
     QPropertyAnimation,
     QRect,
     QSize,
@@ -41,6 +42,7 @@ from PyQt6.QtWidgets import (
 from winrt.windows.data.xml.dom import XmlDocument
 from winrt.windows.ui.notifications import ToastNotification, ToastNotificationManager
 
+from core.utils.floating_popup import DROP_MS, Floating
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
@@ -210,6 +212,11 @@ class PopupWidget(QWidget):
         self._fade_animation.setDuration(animation)
         self._fade_animation.finished.connect(self._on_animation_finished)
 
+        self._floating = Floating(self, parent, self._bar_frame) if bar_anchored else None
+        if self._floating is not None:
+            self._fade_animation.setDuration(DROP_MS)
+            self._fade_animation.valueChanged.connect(lambda value: self._floating and self._floating.fade(value))
+
         self._is_closing = False
 
     @override
@@ -240,13 +247,13 @@ class PopupWidget(QWidget):
         # this is needed to reposition the popup when resized
         self._pos_args = (alignment, direction, offset_left, offset_top, anchor)
 
-        if self._bar_anchored and anchor is None:
-            anchor = self._bar_frame()
+        if self._floating is not None:
+            self._floating.place()
+            self._sync_content_frame()
+            return
         parent = anchor or cast(QWidget, self.parent())  # parent should be a QWidget
         if not parent:
             return
-        if self._bar_anchored and anchor is not None and self.minimumWidth() != anchor.width():
-            self.setMinimumWidth(anchor.width())
 
         widget_global_pos = parent.mapToGlobal(QPoint(offset_left, parent.height() + offset_top))
 
@@ -478,6 +485,8 @@ class PopupWidget(QWidget):
 
         super().showEvent(a0)
         self._sync_content_frame()
+        if self._floating is not None:
+            self._floating.drop_in()
 
         self.activateWindow()
         self._fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -489,7 +498,8 @@ class PopupWidget(QWidget):
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
         if not isinstance(a0, QObject) or a1 is None:
             return False
-        if self._suspend_close or self._pinned:
+        # A closing card lets clicks through untouched, the one it replays to the next item included
+        if self._suspend_close or self._pinned or self._is_closing:
             return super().eventFilter(a0, a1)
         if a1.type() == QEvent.Type.MouseButtonPress:
             global_pos = cast(QMouseEvent, a1).globalPosition().toPoint()
@@ -520,9 +530,38 @@ class PopupWidget(QWidget):
                 if menu.isVisible():
                     menu.close()
 
+            target = self._other_bar_item_at(global_pos)
             self.hide_animated()
+            if target is not None:
+                button = cast(QMouseEvent, a1).button()
+                QTimer.singleShot(0, lambda: self._forward_click(target, global_pos, button))
             return True
         return super().eventFilter(a0, a1)
+
+    def _other_bar_item_at(self, global_pos: QPoint) -> QWidget | None:
+        """The bar widget under a click outside this popup, unless it is the item that opened it."""
+        target = QApplication.widgetAt(global_pos)
+        if target is None or not is_valid_qobject(target):
+            return None
+        if getattr(target.window(), "bar_frame", None) is None:
+            return None
+        if target is self._parent or self._parent.isAncestorOf(target):
+            return None
+        return target
+
+    @staticmethod
+    def _forward_click(target: QWidget, global_pos: QPoint, button: Qt.MouseButton) -> None:
+        """Replay a click the open popup swallowed, so one click both closes it and opens the clicked item."""
+        if not is_valid_qobject(target):
+            return
+        local, screen = QPointF(target.mapFromGlobal(global_pos)), QPointF(global_pos)
+        for kind, buttons in (
+            (QEvent.Type.MouseButtonPress, button),
+            (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        ):
+            QApplication.sendEvent(
+                target, QMouseEvent(kind, local, screen, button, buttons, Qt.KeyboardModifier.NoModifier)
+            )
 
     def set_auto_close_enabled(self, enabled: bool):
         """Enable/disable auto-close behavior when clicking outside."""
@@ -539,25 +578,13 @@ class PopupWidget(QWidget):
 
     def _mark_parent_open(self, is_open: bool) -> None:
         """Give the bar widget's container a popup-open class while its popup shows, so it can look pressed."""
-        if self._bar_anchored:
-            frame = self._bar_frame()
-            if frame is not None:
-                self._set_popup_open_class(frame, is_open)
-            self._fit_bar_to_popup(is_open)
+        if self._floating is not None and not is_open:
+            self._floating.close()
         container = getattr(self._parent, "_widget_container", None)
         if not isinstance(container, QFrame) or not is_valid_qobject(container):
             return
         self._set_popup_open_class(container, is_open)
         refresh_widget_style(container, *container.findChildren(QLabel))
-
-    def _fit_bar_to_popup(self, is_open: bool) -> None:
-        """Widen the bar to this popup's width while it shows, so both read as one shape with flush edges."""
-        widen = getattr(self._parent.window(), "widen_for_popup", None)
-        if not callable(widen):
-            return
-        widen(self, self.width() if is_open else None)
-        if is_open and hasattr(self, "_pos_args"):
-            self.setPosition(*self._pos_args)
 
     @staticmethod
     def _set_popup_open_class(widget: QWidget, is_open: bool) -> None:
@@ -568,8 +595,6 @@ class PopupWidget(QWidget):
     @override
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         self._sync_content_frame()
-        if self._bar_anchored and self.isVisible() and not self._is_closing:
-            self._fit_bar_to_popup(True)
         # reposition if we've already called setPosition()
         if hasattr(self, "_pos_args"):
             self.setPosition(*self._pos_args)

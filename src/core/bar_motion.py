@@ -135,6 +135,7 @@ class Scene:
     full_rect: QRect = field(default_factory=QRect)
     strip: QImage | None = None
     strip_rect: QRect = field(default_factory=QRect)  # screen coordinates
+    stacked: bool = False
 
     def piece_box(self, piece: Piece, frame_width: float, t: float) -> tuple[float, float, float]:
         """Left edge, width and text baseline (frame coordinates) of a piece at progress t of its move."""
@@ -183,15 +184,21 @@ class _Canvas(QWidget):
                 "right": self.width() - scene.full_size.width(),
             }
             shift_y = round((self.height() - scene.full_size.height()) / 2)
+            if scene.stacked:
+                # The bottom row hangs from the top row, so the growing frame uncovers it from the top down
+                shift_x = dict.fromkeys(shift_x, shift_x["center"])
+                shift_y = 0
             boxes = [scene.piece_box(piece, self.width(), look.text) for piece in scene.pieces]
             group_left = min((left for left, _, _ in boxes), default=self.width() / 2)
             group_right = max((left + width for left, width, _ in boxes), default=self.width() / 2)
+            # Side by side, the pills stay outside the moving clock group; stacked, they sit under it
+            anchor_clip = not scene.stacked
             for other in scene.others:
                 rect = other.shot.rect
                 painter.save()
-                if other.anchor == "left":
+                if anchor_clip and other.anchor == "left":
                     painter.setClipRect(QRectF(0, 0, group_left, self.height()))
-                elif other.anchor == "right":
+                elif anchor_clip and other.anchor == "right":
                     painter.setClipRect(QRectF(group_right, 0, self.width() - group_right, self.height()))
                 painter.drawImage(rect.x() + shift_x[other.anchor], rect.y() + shift_y, other.shot.image)
                 painter.restore()
@@ -389,20 +396,13 @@ class BarMotion(QObject):
         bar = self._bar
         frame = bar.bar_frame
         texts = tuple(label.text() for label in frame.findChildren(QLabel))
-        return (hash(bar.styleSheet()), frame.devicePixelRatioF(), bar._popup_extra, texts)
+        return (hash(bar.styleSheet()), frame.devicePixelRatioF(), texts)
 
     def refresh_cache(self) -> None:
         """Re-render both end states when something they show has changed, while the bar rests."""
         bar = self._bar
         manager = bar.autohide_manager
-        if (
-            self._busy
-            or manager is None
-            or not manager.is_enabled()
-            or not bar.isVisible()
-            or bar.underMouse()
-            or bar._popup_extra
-        ):
+        if self._busy or manager is None or not manager.is_enabled() or not bar.isVisible() or bar.underMouse():
             return
         signature = self._signature()
         stable, self._poll_signature = self._poll_signature == signature, signature
@@ -578,7 +578,9 @@ class BarMotion(QObject):
             Piece(cache.peek[widget][1], shot) for widget, (_, shot) in cache.full.items() if widget in cache.peek
         ]
         others = [Other(shot, section) for widget, (section, shot) in cache.full.items() if widget not in cache.peek]
-        self._scene = Scene(peek_size, full_size, pieces, others, window, full_rect, cache.strip, strip_rect)
+        self._scene = Scene(
+            peek_size, full_size, pieces, others, window, full_rect, cache.strip, strip_rect, bar.is_stacked
+        )
         self._peek_look = Look(peek_rest.width(), peek_rest.height(), 0, 0)
         self._full_look = Look(full_rest.width(), full_rest.height(), 1, 1)
         self._look = self._full_look if not expanding else self._peek_look

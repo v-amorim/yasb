@@ -68,11 +68,10 @@ class Bar(QWidget):
         self._maximized_watcher = None
         self._animation_manager = None
         self._auto_width_manager = None
-        self._popup_owner: QWidget | None = None
-        self._popup_extra = 0
         self._cli_manager = None
         self._below_strip: BelowStrip | None = None
         self._section_frames: dict[str, QFrame] = {}
+        self._bottom_row: QFrame | None = None
         self.target_screen = bar_screen
 
         self.screen_name = self.target_screen.name()
@@ -316,10 +315,22 @@ class Bar(QWidget):
                 layout.addStretch(1)
 
             layout_container.setLayout(layout)
-            bar_layout.addWidget(layout_container, 0, column_num)
             self._section_frames[layout_type] = layout_container
+            if not self.config.layouts.stacked:
+                bar_layout.addWidget(layout_container, 0, column_num)
 
-        if self.config.layouts.balanced:
+        if self.config.layouts.stacked:
+            bar_layout.addWidget(self._section_frames["center"], 0, 0, Qt.AlignmentFlag.AlignHCenter)
+            bottom = QFrame()
+            bottom.setProperty("class", "container container-bottom")
+            row = QHBoxLayout(bottom)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(0)
+            row.addWidget(self._section_frames["left"])
+            row.addWidget(self._section_frames["right"])
+            bar_layout.addWidget(bottom, 1, 0, Qt.AlignmentFlag.AlignHCenter)
+            self._bottom_row = bottom
+        elif self.config.layouts.balanced:
             # Equal stretch on equal minimums keeps the center column mid-bar when the bar is wider than its content
             bar_layout.setColumnStretch(0, 1)
             bar_layout.setColumnStretch(2, 1)
@@ -337,31 +348,17 @@ class Bar(QWidget):
         left.setMinimumWidth(width)
         right.setMinimumWidth(width)
 
-    def widen_for_popup(self, owner: QWidget, width: int | None) -> None:
-        """Widen an auto-width bar to an open popup's width, content kept in place; None gives the width back."""
-        layout = self.bar_frame.layout()
-        if not self._is_auto_width or layout is None:
-            return
-        if self.autohide_manager is not None:
-            self.autohide_manager.finish_motion()
-        if width is None:
-            if self._popup_owner is not owner:
-                return
-            self._popup_owner = None
-            extra = 0
-        else:
-            self._popup_owner = owner
-            extra = max(0, width - (self.bar_frame.width() - self._popup_extra))
-        if extra == self._popup_extra:
-            return
-        self._popup_extra = extra
-        layout.setContentsMargins(extra // 2, 0, extra - extra // 2, 0)
-        layout.activate()
-        self.position_bar()
-        self.repaint()
-
     def section_frame(self, name: str) -> QFrame | None:
         return self._section_frames.get(name)
+
+    @property
+    def is_stacked(self) -> bool:
+        return self._bottom_row is not None
+
+    def show_bottom_row(self, visible: bool) -> None:
+        """A stacked bar drops its bottom row while it peeks, so the peek height holds only the top row."""
+        if self._bottom_row is not None:
+            self._bottom_row.setVisible(visible)
 
     def sync_below_strip(self) -> None:
         if self._below_strip is not None:

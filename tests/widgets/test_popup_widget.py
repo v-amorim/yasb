@@ -1,6 +1,8 @@
 from typing import Any
 
 import pytest
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication, QFrame, QWidget
 
 from core.utils import utilities
@@ -60,6 +62,69 @@ def test_anchor_centers_the_popup_on_another_widget(qapp: QApplication) -> None:
 
     assert centered_on_section == section.mapToGlobal(section.rect().center()).x()
     assert centered_on_parent == parent.mapToGlobal(parent.rect().center()).x()
+    window.deleteLater()
+
+
+class _Item(QWidget):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.releases = 0
+
+    def mouseReleaseEvent(self, a0: QMouseEvent | None) -> None:
+        self.releases += 1
+
+
+def _bar_with_two_items(qapp: QApplication) -> tuple[QWidget, _Item, _Item]:
+    window = QWidget()
+    window.setGeometry(100, 100, 600, 40)
+    window.bar_frame = window  # type: ignore[attr-defined]
+    first, second = _Item(window), _Item(window)
+    first.setGeometry(10, 5, 60, 30)
+    second.setGeometry(200, 5, 60, 30)
+    window.show()
+    qapp.processEvents()
+    return window, first, second
+
+
+def _press_at(qapp: QApplication, popup: PopupWidget, widget: QWidget) -> None:
+    point = QPointF(widget.mapToGlobal(widget.rect().center()))
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(popup.mapFromGlobal(point.toPoint())),
+        point,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(popup, press)
+    for _ in range(3):
+        qapp.processEvents()
+
+
+def test_click_on_another_bar_item_closes_the_card_and_reaches_that_item(qapp: QApplication) -> None:
+    window, first, second = _bar_with_two_items(qapp)
+    popup = PopupWidget(first)
+    popup.setGeometry(100, 200, 200, 100)
+    popup.show()
+
+    _press_at(qapp, popup, second)
+
+    assert popup._is_closing
+    assert second.releases == 1, "the click that closed the card also opens the clicked item's card"
+    assert first.releases == 0
+    window.deleteLater()
+
+
+def test_click_on_the_cards_own_item_only_closes_it(qapp: QApplication) -> None:
+    window, first, second = _bar_with_two_items(qapp)
+    popup = PopupWidget(first)
+    popup.setGeometry(100, 200, 200, 100)
+    popup.show()
+
+    _press_at(qapp, popup, first)
+
+    assert popup._is_closing
+    assert first.releases == 0, "a second click on the item toggles its card shut, not open again"
     window.deleteLater()
 
 

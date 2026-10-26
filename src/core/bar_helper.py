@@ -439,6 +439,11 @@ class AutoHideManager(QObject):
     def _apply_visuals(self, peeking: bool, hidden: list[QWidget]) -> None:
         for widget in hidden:
             widget.hide() if peeking else widget.show()
+        self.bar_widget.show_bottom_row(not peeking)
+        for widget in (widget for widgets in self.bar_widget.widgets.values() for widget in widgets):
+            on_peek_changed = getattr(widget, "on_peek_changed", None)
+            if callable(on_peek_changed):
+                on_peek_changed(peeking)
         self._set_peek_class(peeking)
 
     def _run(self, expanding: bool, hidden: list[QWidget], animate: bool) -> None:

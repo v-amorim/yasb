@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QWidget
 from core import bar_helper, bar_motion
 from core.bar import Bar
 from core.bar_helper import AppBarManager
+from core.utils import floating_popup
 from core.utils.utilities import PopupWidget
 from core.utils.win32 import app_bar
 from core.validation.bar import BarConfig, BarWindowFlags
@@ -106,6 +107,7 @@ BAR_CONFIGS: dict[str, dict[str, Any]] = {
         "window_flags": {"auto_hide": True, "auto_hide_peek": ["clock"], "auto_hide_peek_height": 24},
     },
     "no-context-menu": {"context_menu": False},
+    "stacked": {"layouts": {"stacked": True}},
     "no-stretch": {"layouts": {"left": {"stretch": False}, "center": {"stretch": False}, "right": {"stretch": False}}},
     "auto-hide-bottom-slide": {
         "alignment": {"position": "bottom"},
@@ -498,54 +500,149 @@ def test_below_widgets_hang_by_the_center_only_while_the_bar_is_full(
     assert not strip.isVisible()
 
 
-def test_bar_widens_to_an_open_popup_and_returns_on_close(make_bar: MakeBar):
+def _stacked_bar(make_bar: MakeBar, **config: Any) -> Bar:
+    return make_bar(
+        widgets={
+            "left": [_named_widget("levels")],
+            "center": [_named_widget("clock"), _named_widget("date")],
+            "right": [_named_widget("weather"), _named_widget("tray")],
+        },
+        alignment=config.pop("alignment", _CENTERED),
+        dimensions={"width": "auto", "height": 60},
+        animation={"enabled": False},
+        layouts={"stacked": True},
+        **config,
+    )
+
+
+def _y_top(widget: QWidget) -> int:
+    return widget.mapToGlobal(QPoint(0, 0)).y()
+
+
+def test_stacked_bar_puts_the_center_on_a_row_above_the_sides(make_bar: MakeBar):
+    bar = _stacked_bar(make_bar)
+    _wait(20)
+    clock, levels, tray = bar.widgets["center"][0], bar.widgets["left"][0], bar.widgets["right"][1]
+
+    assert _y_top(clock) + clock.height() <= _y_top(levels)
+    assert _y_top(levels) == _y_top(tray) and _x_center(levels) < _x_center(tray)
+    assert abs(_x_center(bar._section_frames["center"]) - _x_center(bar)) <= 1
+    bottom = bar._bottom_row
+    assert bottom is not None and abs(_x_center(bottom) - _x_center(bar)) <= 1
+    assert bar.width() == max(bar._section_frames["center"].width(), bottom.width())
+
+
+def test_stacked_peek_keeps_only_the_top_row(make_bar: MakeBar):
+    bar = _stacked_bar(
+        make_bar, window_flags={"auto_hide": True, "auto_hide_peek": ["clock", "date"], "auto_hide_peek_height": 22}
+    )
+    manager, bottom = bar.autohide_manager, bar._bottom_row
+    assert manager is not None and bottom is not None
+    _wait(20)
+
+    manager.collapse(animate=False)
+    _wait(20)
+    assert bottom.isHidden() and bar.height() == 22
+    assert bar.widgets["center"][0].isVisible()
+
+    manager.expand(animate=False)
+    _wait(20)
+    assert bottom.isVisible() and bar.height() == 60
+
+
+def test_stacked_motion_ends_on_the_geometry_of_the_instant_path(make_bar: MakeBar, monkeypatch: pytest.MonkeyPatch):
+    stacked = {"layouts": {"stacked": True}}
+    reference = _motion_bar(make_bar, monkeypatch, **stacked)
+    ref_manager = reference.autohide_manager
+    assert ref_manager is not None
+    ref_manager.collapse(animate=False)
+    _wait(30)
+    peek_window = reference.geometry()
+    ref_manager.expand(animate=False)
+    _wait(30)
+    full_window = reference.geometry()
+    reference.skip_animation = True
+    reference.hide()
+
+    bar = _motion_bar(make_bar, monkeypatch, **stacked)
+    manager = bar.autohide_manager
+    assert manager is not None
+    motion = manager._motion
+    manager.collapse()
+    _play(motion)
+    assert bar.geometry() == peek_window
+    assert motion._scene is None
+
+    manager.expand()
+    assert motion._scene is not None and motion._scene.stacked
+    looks = _play(motion)
+    assert bar.geometry() == full_window
+    assert looks[-1].height == pytest.approx(full_window.height(), abs=0.01)
+    assert all(widget.isVisible() for widgets in bar.widgets.values() for widget in widgets)
+
+
+_TOP_OF_SCREEN = {"position": "top", "align": "center"}
+
+
+def _open_floating(item: QWidget, width: int) -> PopupWidget:
+    popup = PopupWidget(item, bar_anchored=True)
+    popup.setFixedSize(width, 60)
+    popup.setPosition(alignment="left")
+    popup.show()
+    _wait(floating_popup.DROP_MS + 60)
+    return popup
+
+
+@pytest.mark.parametrize("extra", [120, -40], ids=["wider", "narrower"])
+def test_bar_anchored_popup_floats_centred_under_the_bar_at_its_own_width(make_bar: MakeBar, extra: int):
     clock, tray = _named_widget("clock"), _named_widget("tray")
     bar = make_bar(
         widgets={"left": [_named_widget("levels")], "center": [clock], "right": [tray]},
-        alignment=_CENTERED,
+        alignment=_TOP_OF_SCREEN,
         dimensions={"width": "auto", "height": 34},
         animation={"enabled": False},
-        layouts={"balanced": True},
     )
     _wait(20)
-    resting_width, clock_x = bar.width(), _x_center(clock)
-    popup = PopupWidget(tray, bar_anchored=True)
-    popup.setFixedSize(resting_width + 120, 60)
-    popup.setPosition(alignment="center")
+    resting = bar.geometry()
 
-    popup.show()
+    popup = _open_floating(tray, resting.width() + extra)
+
+    assert bar.geometry() == resting, "the bar no longer reshapes for a popup"
+    assert popup.width() == resting.width() + extra
+    assert abs(_x_center(popup) - _x_center(bar)) <= 1
+    assert popup.y() == bar.bar_frame.mapToGlobal(QPoint(0, bar.bar_frame.height())).y() + floating_popup.GAP
+    popup.hide()
+
+
+def test_floating_popup_hangs_a_thread_from_its_item_into_its_top_border(make_bar: MakeBar):
+    bar = _stacked_bar(make_bar, alignment=_TOP_OF_SCREEN)
     _wait(20)
+    levels = bar.widgets["left"][0]
 
-    assert bar.width() == popup.width() == bar.bar_frame.width()
-    assert bar.x() == popup.x()
-    assert abs(_x_center(clock) - clock_x) <= 1
+    popup = _open_floating(levels, 300)
+    assert popup._floating is not None
+    thread = popup._floating.thread
+
+    assert thread.isVisible()
+    assert abs(thread.geometry().center().x() - _x_center(levels)) <= 1
+    assert thread.y() == _y_top(levels) + levels.height(), "an item on the bottom row starts the thread itself"
+    assert thread.geometry().bottom() + 1 == popup.y() + floating_popup.BORDER
+    assert thread.windowFlags() & Qt.WindowType.WindowTransparentForInput
 
     popup.hide()
     _wait(20)
-
-    assert bar.width() == resting_width
-    assert abs(_x_center(clock) - clock_x) <= 1
+    assert not thread.isVisible()
 
 
-def test_bar_keeps_its_width_for_a_narrower_popup(make_bar: MakeBar):
-    tray = _named_widget("tray")
-    bar = make_bar(
-        widgets={"center": [_named_widget("clock")], "right": [tray]},
-        alignment=_CENTERED,
-        dimensions={"width": "auto", "height": 34},
-        animation={"enabled": False},
-    )
+def test_thread_from_the_top_row_starts_at_the_bar_edge(make_bar: MakeBar):
+    bar = _stacked_bar(make_bar, alignment=_TOP_OF_SCREEN)
     _wait(20)
-    resting_width = bar.width()
-    popup = PopupWidget(tray, bar_anchored=True)
-    popup.resize(resting_width - 40, 60)
-    popup.setPosition(alignment="center")
+    clock = bar.widgets["center"][0]
 
-    popup.show()
-    _wait(20)
+    popup = _open_floating(clock, 300)
+    assert popup._floating is not None
 
-    assert bar.width() == resting_width
-    assert popup.width() == resting_width
+    assert popup._floating.thread.y() == bar.bar_frame.mapToGlobal(QPoint(0, bar.bar_frame.height())).y()
     popup.hide()
 
 
@@ -604,7 +701,7 @@ def _motion_bar(
         },
         alignment=_TOP_CENTER,
         dimensions={"width": "auto", "height": 40},
-        layouts={"balanced": True},
+        layouts=config.pop("layouts", {"balanced": True}),
         **{
             "animation": {"enabled": True, "duration": 10},
             "window_flags": {
@@ -767,33 +864,6 @@ def test_reduced_motion_jumps_to_the_end_state(make_bar: MakeBar, monkeypatch: p
     assert all(widget.isVisible() for widgets in bar.widgets.values() for widget in widgets)
 
 
-def test_popup_still_widens_the_bar_after_an_expand(make_bar: MakeBar, monkeypatch: pytest.MonkeyPatch):
-    bar = _motion_bar(make_bar, monkeypatch)
-    manager = bar.autohide_manager
-    assert manager is not None
-    tray = bar.widgets["right"][0]
-    clock = bar.widgets["center"][0]
-    manager.collapse(animate=False)
-    manager.expand()
-    _play(manager._motion)
-    _wait(20)
-    resting_width, clock_x = bar.width(), _x_center(clock)
-
-    popup = PopupWidget(tray, bar_anchored=True)
-    popup.setFixedSize(resting_width + 120, 60)
-    popup.setPosition(alignment="center")
-    popup.show()
-    _wait(20)
-
-    assert bar.width() == popup.width() == bar.bar_frame.width()
-    assert bar.x() == popup.x()
-    assert abs(_x_center(clock) - clock_x) <= 1
-
-    popup.hide()
-    _wait(20)
-    assert bar.width() == resting_width
-
-
 def test_popup_opening_mid_motion_ends_the_motion_first(make_bar: MakeBar, monkeypatch: pytest.MonkeyPatch):
     bar = _motion_bar(make_bar, monkeypatch)
     manager = bar.autohide_manager
@@ -803,14 +873,10 @@ def test_popup_opening_mid_motion_ends_the_motion_first(make_bar: MakeBar, monke
     manager.expand()
     _play(manager._motion, until=80)
 
-    popup = PopupWidget(tray, bar_anchored=True)
-    popup.setFixedSize(bar.width() + 200, 60)
-    popup.setPosition(alignment="center")
-    popup.show()
-    _wait(20)
+    popup = _open_floating(tray, bar.width() + 200)
 
     assert not manager._motion.active
-    assert bar.width() == popup.width() == bar.bar_frame.width()
+    assert abs(_x_center(popup) - _x_center(bar.bar_frame)) <= 1
     popup.hide()
 
 

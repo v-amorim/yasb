@@ -13,7 +13,7 @@ from typing import NotRequired, TypedDict, cast, override
 from zoneinfo import ZoneInfo, available_timezones
 
 from PyQt6.QtCore import QDate, QLocale, QPoint, QRect, Qt, QTimer
-from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPalette, QShowEvent
+from PyQt6.QtGui import QAction, QColor, QPainter, QPalette, QShowEvent
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.config import HOME_CONFIGURATION_DIR
+from core.utils.tabular import set_tabular
 from core.utils.tooltip import set_tooltip, show_tooltip_now
 from core.utils.utilities import PopupWidget, refresh_widget_style
 from core.utils.win32.backdrop import enable_blur
@@ -316,6 +317,7 @@ class CustomCalendar(QCalendarWidget):
         table_view = self.findChild(QTableView)
         if table_view:
             table_view.setProperty("class", "calendar-table")
+            set_tabular(table_view)
             palette = table_view.palette()
             palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 0, 0, 0))
             palette.setColor(QPalette.ColorRole.HighlightedText, palette.color(QPalette.ColorRole.Text))
@@ -402,12 +404,10 @@ class ClockWidget(BaseWidget):
         self._init_container()
         self.build_widget_label(self._label_content, self._label_alt_content)
         # Tabular figures: every digit one width, so ticking seconds never wiggle the text
-        for label in (*self._widgets, *self._widgets_alt):
-            font = label.font()
-            font.setFeature(QFont.Tag("tnum"), 1)
-            label.setFont(font)
+        set_tabular(*self._widgets, *self._widgets_alt)
 
         self._timer_label = QLabel()
+        set_tabular(self._timer_label)
         self._timer_label.setProperty("class", "label timer")
         self._timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._timer_label.hide()
@@ -783,6 +783,9 @@ class ClockWidget(BaseWidget):
         # Create main layout
         layout = QHBoxLayout()
         layout.setProperty("class", "calendar-layout")
+        layout.setSpacing(8)
+        if self.config.calendar.anchor == "bar":
+            layout.setContentsMargins(0, 0, 0, 0)
         self._yasb_calendar.setLayout(layout)
 
         # Left side: Today Date

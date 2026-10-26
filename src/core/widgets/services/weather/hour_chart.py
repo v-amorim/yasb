@@ -7,6 +7,8 @@ from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPaintEvent, QPalette, QPen
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from core.utils.tabular import set_tabular
+
 # pyqtProperty exists at runtime but is missing from the PyQt6 type stubs
 pyqtProperty: Callable[..., Any] = getattr(QtCore, "pyqtProperty")
 
@@ -18,7 +20,7 @@ LINE_TOP = 3
 LINE_BAND = 22
 BAR_MAX_HEIGHT = 40
 MIN_TEMP_SPAN = 4
-TIP_GAP = 6
+TIP_GAP = 8
 
 
 @dataclass
@@ -49,7 +51,7 @@ class HourTip(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setProperty("class", "hour-tip")
-        self._radius = 8
+        self._radius = 4
 
         self._hour = self._label("hour-tip-hour")
         self._temp = self._label("hour-tip-temp")
@@ -73,19 +75,21 @@ class HourTip(QFrame):
         column.addWidget(self._temp)
         column.addLayout(detail)
 
-    def _get_radius(self) -> int:
-        return self._radius
+    def _get_radius(self) -> str:
+        return f"{self._radius}px"
 
-    def _set_radius(self, radius: int) -> None:
-        self._radius = radius
+    # A string so the stylesheet can pass the --radius-tile token, whose value ends in px
+    def _set_radius(self, radius: str) -> None:
+        self._radius = int(str(radius).removesuffix("px"))
         self.update()
 
-    radius: int = pyqtProperty(int, _get_radius, _set_radius)
+    radius: str = pyqtProperty(str, _get_radius, _set_radius)
 
     def _label(self, class_name: str) -> QLabel:
         part = QLabel(self)
         part.setProperty("class", class_name)
         part.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        set_tabular(part)
         return part
 
     @override

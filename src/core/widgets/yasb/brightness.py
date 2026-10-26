@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
     QSlider,
     QStyle,
@@ -18,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.ui.components.fill_slider import FillSlider
+from core.utils.optical import center_icon_on_text
 from core.utils.qobject import is_valid_qobject
 from core.utils.tooltip import CustomToolTip, set_tooltip
 from core.utils.utilities import PopupWidget, build_progress_widget, refresh_widget_style
@@ -235,7 +237,7 @@ class BrightnessWidget(BaseWidget):
             self.dialog.setProperty("class", "brightness-menu")
 
             layout = QVBoxLayout(self.dialog)
-            layout.setSpacing(0)
+            layout.setSpacing(8)
             layout.setContentsMargins(0, 0, 0, 0)
 
             self._sliders = {}
@@ -295,9 +297,12 @@ class BrightnessWidget(BaseWidget):
             button.setProperty("class", "preset")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             row = QHBoxLayout(button)
-            row.setContentsMargins(10, 6, 10, 6)
+            row.setContentsMargins(10, 4, 10, 4)
             row.setSpacing(8)
-            levels = f"B{preset.brightness}" + (f" C{preset.contrast}" if preset.contrast is not None else "")
+            # A button sizes from its own empty text, so only the layout can keep the tile as wide as its labels
+            row.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+            levels = f"{preset.brightness}%" + (f" / {preset.contrast}%" if preset.contrast is not None else "")
+            parts: dict[str, QLabel] = {}
             for text, class_name in ((preset.icon, "icon"), (preset.name, "name"), (levels, "level")):
                 if not text:
                     continue
@@ -305,6 +310,9 @@ class BrightnessWidget(BaseWidget):
                 label.setProperty("class", class_name)
                 label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
                 row.addWidget(label, 1 if class_name == "name" else 0)
+                parts[class_name] = label
+            if "icon" in parts and "name" in parts:
+                center_icon_on_text(parts["icon"], parts["name"])
             button.clicked.connect(partial(self._apply_preset, preset))
             grid.addWidget(button, index // columns, index % columns)
             self._preset_buttons.append((button, preset))
@@ -346,7 +354,7 @@ class BrightnessWidget(BaseWidget):
         row_widget.setProperty("class", "slider-row")
         row = QHBoxLayout(row_widget)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
+        row.setSpacing(8)
 
         if menu.slider_style == "fill":
             slider: QSlider = FillSlider(icon, menu.brightness_label if kind == "brightness" else menu.contrast_label)
@@ -397,7 +405,7 @@ class BrightnessWidget(BaseWidget):
         sliders_group.setProperty("class", "slider-rows")
         sliders_layout = QVBoxLayout(sliders_group)
         sliders_layout.setContentsMargins(0, 0, 0, 0)
-        sliders_layout.setSpacing(0)
+        sliders_layout.setSpacing(4)
 
         self._add_slider_row(sliders_layout, hmonitor, "brightness")
         self._monitor_slider_layouts[hmonitor] = sliders_layout

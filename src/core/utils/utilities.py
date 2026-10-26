@@ -42,7 +42,7 @@ from PyQt6.QtWidgets import (
 from winrt.windows.data.xml.dom import XmlDocument
 from winrt.windows.ui.notifications import ToastNotification, ToastNotificationManager
 
-from core.utils.floating_popup import DROP_MS, Floating
+from core.utils.floating_popup import Floating, fade_ms
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
@@ -209,12 +209,11 @@ class PopupWidget(QWidget):
         self._popup_content = QFrame(self)
 
         self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
-        self._fade_animation.setDuration(animation)
+        self._fade_base_ms = animation
         self._fade_animation.finished.connect(self._on_animation_finished)
 
         self._floating = Floating(self, parent, self._bar_frame) if bar_anchored else None
         if self._floating is not None:
-            self._fade_animation.setDuration(DROP_MS)
             self._fade_animation.valueChanged.connect(lambda value: self._floating and self._floating.fade(value))
 
         self._is_closing = False
@@ -246,6 +245,10 @@ class PopupWidget(QWidget):
         # store the arguments for later use
         # this is needed to reposition the popup when resized
         self._pos_args = (alignment, direction, offset_left, offset_top, anchor)
+
+        # Qt's own sizing inside show() never reaches the adjustSize override, so the inset is sized in here.
+        if self._bar_anchored and not self.isVisible():
+            self.adjustSize()
 
         if self._floating is not None:
             self._floating.place()
@@ -283,6 +286,20 @@ class PopupWidget(QWidget):
             global_position = QPoint(x, y)
         self.move(global_position)
         self._sync_content_frame()
+
+    def _apply_card_inset(self) -> None:
+        """A floating card takes its border and padding from the stylesheet, so one value sets every card's inset."""
+        if not self._bar_anchored:
+            return
+        self._popup_content.ensurePolished()
+        margins = self._popup_content.contentsMargins()
+        if margins != self.contentsMargins():
+            self.setContentsMargins(margins)
+
+    @override
+    def adjustSize(self) -> None:
+        self._apply_card_inset()
+        super().adjustSize()
 
     def _sync_content_frame(self) -> None:
         # A stylesheet min-width resizes the window without a resize event reaching us, so the frame can lag behind
@@ -386,6 +403,7 @@ class PopupWidget(QWidget):
 
         self._is_closing = True
 
+        self._fade_animation.setDuration(fade_ms(self._floating is not None, False, self._fade_base_ms))
         self._fade_animation.setEasingCurve(QEasingCurve.Type.InCubic)
         self._fade_animation.setStartValue(current_opacity)
         self._fade_animation.setEndValue(0.0)
@@ -489,6 +507,7 @@ class PopupWidget(QWidget):
             self._floating.drop_in()
 
         self.activateWindow()
+        self._fade_animation.setDuration(fade_ms(self._floating is not None, True, self._fade_base_ms))
         self._fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._fade_animation.setStartValue(0.0)
         self._fade_animation.setEndValue(1.0)

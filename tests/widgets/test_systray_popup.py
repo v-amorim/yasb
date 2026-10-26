@@ -1,6 +1,7 @@
 # pyright: reportPrivateUsage=false
 
-from PyQt6.QtCore import QEventLoop, QTimer
+import pytest
+from PyQt6.QtCore import QEasingCurve, QEventLoop, QPropertyAnimation, QTimer
 from PyQt6.QtWidgets import QApplication, QFrame, QPushButton, QWidget
 
 from core.utils import floating_popup
@@ -67,6 +68,89 @@ def test_opening_another_bar_card_closes_the_open_tray_card(qapp: QApplication) 
     window.deleteLater()
 
 
+def _bar_tray(qapp: QApplication) -> tuple[QWidget, QFrame, SystrayPopup]:
+    window, frame, button = _bar(qapp)
+    popup = SystrayPopup(button.parentWidget(), button, SystrayPopupConfig(anchor="bar", offset_top=0), 4)
+    return window, frame, popup
+
+
+def test_reduced_motion_systray_opens_at_its_final_spot_without_fade(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: False)
+    window, frame, popup = _bar_tray(qapp)
+
+    popup.open("")
+
+    assert popup._floating is not None
+    assert popup._floating._drop.state() != QPropertyAnimation.State.Running
+    assert popup.pos() == floating_popup.centred_under(popup, frame)
+    assert popup._fade_animation.duration() == 0
+    assert popup.windowOpacity() == 1.0
+    popup.hide()
+    window.deleteLater()
+
+
+def test_reduced_motion_systray_closes_at_once(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: False)
+    window, _, popup = _bar_tray(qapp)
+    popup.open("")
+
+    popup.hide_animated()
+
+    assert not popup.isVisible()
+    assert not popup._is_closing
+    window.deleteLater()
+
+
+def test_systray_animations_on_drops_in_and_fades_over_180ms(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: True)
+    window, frame, popup = _bar_tray(qapp)
+
+    popup.open("")
+
+    assert popup._floating is not None
+    assert popup._floating._drop.state() == QPropertyAnimation.State.Running
+    assert popup.y() == floating_popup.centred_under(popup, frame).y() - floating_popup.DROP
+    assert popup._fade_animation.duration() == floating_popup.DROP_MS
+    popup.hide()
+    window.deleteLater()
+
+
+def test_systray_fades_with_the_same_easing_as_popup_widget(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: True)
+    window, _, popup = _bar_tray(qapp)
+
+    popup.open("")
+    assert popup._fade_animation.easingCurve().type() == QEasingCurve.Type.OutCubic
+    popup.hide_animated()
+
+    assert popup._fade_animation.easingCurve().type() == QEasingCurve.Type.InCubic
+    popup.hide()
+    window.deleteLater()
+
+
+def test_systray_exit_fade_is_120ms_and_the_next_open_is_180ms_again(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: True)
+    window, _, popup = _bar_tray(qapp)
+    popup.open("")
+
+    popup.hide_animated()
+    assert popup._fade_animation.duration() == floating_popup.EXIT_MS == 120
+    popup.hide()
+    popup.open("")
+
+    assert popup._fade_animation.duration() == floating_popup.DROP_MS
+    popup.hide()
+    window.deleteLater()
+
+
 def test_widget_anchored_popup_leaves_the_bar_alone(qapp: QApplication) -> None:
     window, frame, button = _bar(qapp)
     popup = SystrayPopup(button.parentWidget(), button, SystrayPopupConfig(), 4)
@@ -100,8 +184,8 @@ def test_tiles_fill_three_equal_columns(qapp: QApplication) -> None:
     assert len({tile.width() for tile in tiles}) == 1
     assert tiles[0].x() == tiles[3].x() == tiles[6].x()
     assert tiles[0].x() < tiles[1].x() < tiles[2].x()
-    assert tiles[1].x() - (tiles[0].x() + tiles[0].width()) == 6
-    assert tiles[3].y() - (tiles[0].y() + tiles[0].height()) == 6
+    assert tiles[1].x() - (tiles[0].x() + tiles[0].width()) == 8
+    assert tiles[3].y() - (tiles[0].y() + tiles[0].height()) == 8
     popup.hide()
     window.deleteLater()
 

@@ -113,7 +113,7 @@ def test_settings_list_holds_the_groups_then_all_settings(host: QWidget):
         "Apps",
         "Accounts",
         "Privacy & Security",
-        "All Settings",
+        "All settings",
     ]
 
 
@@ -123,7 +123,7 @@ def test_settings_groups_come_from_the_config(host: QWidget):
 
     assert [row.findChildren(QLabel)[1].text() for row in _rows(section, "settings-item")] == [
         "Display",
-        "All Settings",
+        "All settings",
     ]
 
 

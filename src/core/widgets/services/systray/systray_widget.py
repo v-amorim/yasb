@@ -73,7 +73,7 @@ class IconState:
         return state
 
 
-GRID_GAP = 6
+GRID_GAP = 8
 TILE_PADDING = 10
 TILE_GAP = 8
 TILE_HINT_WIDTH = 150

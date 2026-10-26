@@ -6,12 +6,24 @@ from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRect, Qt, py
 from PyQt6.QtGui import QColor, QPainter, QPaintEvent
 from PyQt6.QtWidgets import QApplication, QWidget
 
+from core.bar_motion import animations_enabled
+
 GAP = 18
 DROP = 8
 DROP_MS = 180
+EXIT_MS = 120
 THREAD_WIDTH = 2
 # The card's border width: the thread runs into it so the two read as one line
 BORDER = 2
+
+
+def fade_ms(floating: bool, opening: bool, base: int) -> int:
+    """How long a popup's fade runs: none when Windows animations are off, else the card's or the plain popup's own."""
+    if not animations_enabled():
+        return 0
+    if not floating:
+        return base
+    return DROP_MS if opening else EXIT_MS
 
 
 def centred_under(popup: QWidget, frame: QWidget) -> QPoint:
@@ -130,6 +142,11 @@ class Floating:
             manager.finish_motion()
         target = centred_under(self._popup, frame)
         self._drop.stop()
+        if not animations_enabled():
+            self._popup.move(target)
+            self.thread.setWindowOpacity(1.0)
+            self.thread.follow(thread_start(self._item, frame), QRect(target, self._popup.size()))
+            return
         self._drop.setStartValue(target - QPoint(0, DROP))
         self._drop.setEndValue(target)
         self._popup.move(target - QPoint(0, DROP))

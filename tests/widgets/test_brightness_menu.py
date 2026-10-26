@@ -162,7 +162,7 @@ def test_a_preset_sets_every_monitor_and_turns_active(make_widget: MakeWidget, s
         for label in button.findChildren(QLabel)
         if label.property("class") == "level"
     ]
-    assert level_texts == ["B15 C40", "B90"]
+    assert level_texts == ["15% / 40%", "90%"]
 
     night.click()
     assert service.brightness[MONITOR] == 15 and service.contrast[MONITOR] == 40
@@ -171,6 +171,46 @@ def test_a_preset_sets_every_monitor_and_turns_active(make_widget: MakeWidget, s
 
     widget._sliders[f"brightness_{MONITOR}"].setValue(60)
     assert night.property("class") == "preset"
+
+
+def test_preset_label_reads_percentages(make_widget: MakeWidget):
+    presets = [{"name": "Night", "brightness": 15, "contrast": 40}, {"name": "Day", "brightness": 90}]
+    widget = make_widget(presets=presets)
+    widget._show_brightness_menu()
+
+    levels = [
+        label.text()
+        for button, _ in widget._preset_buttons
+        for label in button.findChildren(QLabel)
+        if label.property("class") == "level"
+    ]
+    assert levels == ["15% / 40%", "90%"]
+
+
+def test_preset_tile_fits_its_labels(make_widget: MakeWidget):
+    presets = [{"name": "Night coding", "icon": "N", "brightness": 15, "contrast": 40}]
+    widget = make_widget(presets=presets)
+    widget._show_brightness_menu()
+    QApplication.processEvents()
+
+    (tile, _) = widget._preset_buttons[0]
+    labels = tile.findChildren(QLabel)
+    assert len(labels) == 3
+    assert tile.minimumWidth() >= sum(label.sizeHint().width() for label in labels)
+    assert tile.width() >= sum(label.sizeHint().width() for label in labels)
+
+
+def test_optical_applied_brightness_presets(make_widget: MakeWidget, monkeypatch: pytest.MonkeyPatch):
+    pairs: list[tuple[QLabel, QLabel]] = []
+    real = brightness.center_icon_on_text
+    monkeypatch.setattr(
+        brightness, "center_icon_on_text", lambda icon, text: (pairs.append((icon, text)), real(icon, text))
+    )
+    presets = [{"name": "Night", "icon": "N", "brightness": 15}, {"name": "Plain", "brightness": 90}]
+    widget = make_widget(presets=presets)
+    widget._show_brightness_menu()
+
+    assert [(icon.text(), text.text()) for icon, text in pairs] == [("N", "Night")]
 
 
 def test_presets_lay_out_in_the_configured_columns(make_widget: MakeWidget):

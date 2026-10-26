@@ -1,10 +1,10 @@
 from typing import override
 
-from PyQt6.QtCore import QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QCursor, QHideEvent, QResizeEvent, QShowEvent
 from PyQt6.QtWidgets import QApplication, QFrame, QPushButton, QVBoxLayout, QWidget
 
-from core.utils.floating_popup import DROP_MS, Floating
+from core.utils.floating_popup import Floating, fade_ms
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
@@ -69,11 +69,10 @@ class SystrayPopup(QWidget):
 
         # Fade animation
         self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
-        self._fade_animation.setDuration(80)
+        self._fade_base_ms = 80
         self._fade_animation.finished.connect(self._on_animation_finished)
         self._floating = Floating(self, parent, self._bar_frame) if self._bar_anchored and parent is not None else None
         if self._floating is not None:
-            self._fade_animation.setDuration(DROP_MS)
             self._fade_animation.valueChanged.connect(lambda value: self._floating and self._floating.fade(value))
 
         # Watch timer for native mouse-poll (context-menu interaction)
@@ -208,6 +207,8 @@ class SystrayPopup(QWidget):
             self._floating.drop_in()
         self.activateWindow()
 
+        self._fade_animation.setDuration(fade_ms(self._floating is not None, True, self._fade_base_ms))
+        self._fade_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._fade_animation.setStartValue(0.0)
         self._fade_animation.setEndValue(1.0)
         self._fade_animation.start()
@@ -232,6 +233,8 @@ class SystrayPopup(QWidget):
             self.setWindowOpacity(1.0)
 
         self._is_closing = True
+        self._fade_animation.setDuration(fade_ms(self._floating is not None, False, self._fade_base_ms))
+        self._fade_animation.setEasingCurve(QEasingCurve.Type.InCubic)
         self._fade_animation.setStartValue(current_opacity)
         self._fade_animation.setEndValue(0.0)
         self._fade_animation.start()

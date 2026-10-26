@@ -9,6 +9,7 @@ from PyQt6.QtGui import QAction, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from core.bar_helper import GlobalState
+from core.utils.optical import center_icon_on_text, track_letter_spacing
 from core.utils.qobject import is_valid_qobject
 from core.utils.shell_utils import shell_open
 from core.utils.tooltip import set_tooltip
@@ -83,7 +84,8 @@ class SystemControlsSectionWidget(QFrame):
         power_list.setProperty("class", "power-list")
         grid = QGridLayout(power_list)
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         actions = [
@@ -100,10 +102,12 @@ class SystemControlsSectionWidget(QFrame):
             row.setCursor(Qt.CursorShape.PointingHandCursor)
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            for text, part_class in ((icon, "icon"), (title, "label")):
-                part = QLabel(text, row)
+            row_layout.setSpacing(8)
+            icon_label, title_label = (QLabel(text, row) for text in (icon, title))
+            for part, part_class in ((icon_label, "icon"), (title_label, "label")):
                 part.setProperty("class", part_class)
                 row_layout.addWidget(part)
+            center_icon_on_text(icon_label, title_label)
             row_layout.addStretch(1)
             row.clicked.connect(partial(self._run_power_action, run))
             last = index == len(actions) - 1
@@ -122,8 +126,10 @@ class SystemControlsSectionWidget(QFrame):
             header.setProperty("class", "settings-group")
             header_layout = QHBoxLayout(header)
             header_layout.setContentsMargins(0, 0, 0, 0)
+            header_layout.setSpacing(8)
             label = QLabel(group.label.upper(), header)
             label.setProperty("class", "settings-group-label")
+            track_letter_spacing(label)
             rule = QFrame(header)
             rule.setProperty("class", "settings-group-rule")
             header_layout.addWidget(label)
@@ -135,7 +141,7 @@ class SystemControlsSectionWidget(QFrame):
         separator.setProperty("class", "settings-separator")
         column.addWidget(separator)
         column.addWidget(
-            self._build_settings_row(settings_list, self.config.settings_icon, "All Settings", "ms-settings:")
+            self._build_settings_row(settings_list, self.config.settings_icon, "All settings", "ms-settings:")
         )
         settings_list.hide()
         return settings_list
@@ -146,10 +152,12 @@ class SystemControlsSectionWidget(QFrame):
         row.setCursor(Qt.CursorShape.PointingHandCursor)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        for text, part_class in ((icon, "icon"), (title, "label")):
-            part = QLabel(text, row)
+        row_layout.setSpacing(8)
+        icon_label, title_label = (QLabel(text, row) for text in (icon, title))
+        for part, part_class in ((icon_label, "icon"), (title_label, "label")):
             part.setProperty("class", part_class)
             row_layout.addWidget(part)
+        center_icon_on_text(icon_label, title_label)
         row_layout.addStretch(1)
         row.clicked.connect(partial(self._open_settings_page, uri))
         return row
@@ -292,7 +300,7 @@ class SystemControlsSectionWidget(QFrame):
             ("Accounts", "ms-settings:yourinfo"),
             ("Privacy && Security", "ms-settings:privacy"),
             None,
-            ("All Settings", "ms-settings:"),
+            ("All settings", "ms-settings:"),
         ]
         self._populate_menu(
             menu,
@@ -322,7 +330,7 @@ class SystemControlsSectionWidget(QFrame):
             menu,
             [
                 ("Lock", self._power_ops.lock),
-                ("Sign Out", self._power_ops.signout),
+                ("Sign out", self._power_ops.signout),
             ],
         )
 
@@ -347,7 +355,7 @@ class SystemControlsSectionWidget(QFrame):
                 ("Sleep", self._power_ops.sleep),
                 ("Hibernate", self._power_ops.hibernate),
                 ("Restart", self._power_ops.restart),
-                ("Shut Down", self._power_ops.shutdown),
+                ("Shut down", self._power_ops.shutdown),
             ],
         )
 

@@ -18,7 +18,9 @@ from PyQt6.QtWidgets import (
 )
 
 from core.bar_helper import GlobalState
+from core.utils.optical import center_icon_on_text
 from core.utils.qobject import is_valid_qobject
+from core.utils.tabular import set_tabular
 from core.utils.tooltip import set_tooltip
 from core.utils.win32.bindings.user32 import user32
 from core.utils.win32.utils import apply_qmenu_style
@@ -156,8 +158,10 @@ class SlidersSectionWidget(QFrame):
 
         value_label = QLabel(initial_text, row)
         value_label.setProperty("class", "value")
+        set_tabular(value_label)
         value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(value_label)
+        center_icon_on_text(icon_label, value_label)
 
         if slider_config.show_source_selector:
             source_btn = QPushButton(slider_config.source_selector_icon, row)

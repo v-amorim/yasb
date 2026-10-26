@@ -74,7 +74,7 @@ class PowerSectionWidget(QFrame):
         # Set up a 2-column Grid Layout
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(0)
+        grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(0)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)

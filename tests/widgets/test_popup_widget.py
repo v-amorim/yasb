@@ -1,11 +1,12 @@
 from typing import Any
 
 import pytest
-from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtCore import QEasingCurve, QEvent, QPointF, QPropertyAnimation, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication, QFrame, QWidget
 
-from core.utils import utilities
+from core.utils import floating_popup, utilities
+from core.utils.floating_popup import centred_under
 from core.utils.utilities import PopupWidget
 
 
@@ -125,6 +126,79 @@ def test_click_on_the_cards_own_item_only_closes_it(qapp: QApplication) -> None:
 
     assert popup._is_closing
     assert first.releases == 0, "a second click on the item toggles its card shut, not open again"
+    window.deleteLater()
+
+
+def _anchored_card(qapp: QApplication) -> tuple[QWidget, PopupWidget]:
+    window, first, _ = _bar_with_two_items(qapp)
+    card = PopupWidget(first, bar_anchored=True)
+    card.resize(200, 80)
+    return window, card
+
+
+def test_reduced_motion_popup_widget_opens_at_its_final_spot_without_fade(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: False)
+    window, card = _anchored_card(qapp)
+
+    card.show()
+
+    assert card._floating is not None
+    assert card.pos() == centred_under(card, window)
+    assert card._floating._drop.state() != QPropertyAnimation.State.Running
+    assert card._fade_animation.duration() == 0
+    assert card.windowOpacity() == 1.0
+    assert card._floating.thread.windowOpacity() == 1.0
+    card.hide()
+    window.deleteLater()
+
+
+def test_reduced_motion_popup_widget_closes_at_once(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: False)
+    window, card = _anchored_card(qapp)
+    card.show()
+
+    card.hide_animated()
+
+    assert not card.isVisible()
+    assert card._fade_animation.duration() == 0
+    window.deleteLater()
+
+
+def test_popup_widget_animations_on_drops_in_and_fades_over_180ms(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: True)
+    window, card = _anchored_card(qapp)
+
+    card.show()
+
+    assert card._floating is not None
+    assert card._floating._drop.state() == QPropertyAnimation.State.Running
+    assert card._floating._drop.duration() == floating_popup.DROP_MS == 180
+    assert card.y() == centred_under(card, window).y() - floating_popup.DROP
+    assert card._fade_animation.duration() == 180
+    assert card._fade_animation.easingCurve().type() == QEasingCurve.Type.OutCubic
+    card.hide()
+    window.deleteLater()
+
+
+def test_popup_widget_exit_fade_is_120ms_and_the_next_open_is_180ms_again(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(floating_popup, "animations_enabled", lambda: True)
+    window, card = _anchored_card(qapp)
+    card.show()
+
+    card.hide_animated()
+    assert card._fade_animation.duration() == 120
+    assert card._fade_animation.easingCurve().type() == QEasingCurve.Type.InCubic
+    card.hide()
+    card.show()
+
+    assert card._fade_animation.duration() == 180
+    card.hide()
     window.deleteLater()
 
 

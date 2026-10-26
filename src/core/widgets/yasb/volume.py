@@ -296,9 +296,8 @@ class VolumeWidget(BaseWidget):
         slider.setPageStep(step)
 
     def _format_session_label(self, name: str) -> str:
-        """Format session label by removing file extensions and truncating if necessary"""
-        name = name.removesuffix(".exe").replace(".", " ").title()
-        return name if len(name) <= 23 else f"{name[:20]}..."
+        """Format session label by removing file extensions; the row elides it when it does not fit"""
+        return name.removesuffix(".exe").replace(".", " ").title()
 
     @override
     def event(self, a0: QEvent | None) -> bool:
@@ -365,7 +364,9 @@ class VolumeWidget(BaseWidget):
         # Create vertical layout for the dialog
         layout = QVBoxLayout()
         layout.setSpacing(0)
-        layout.setContentsMargins(10, 10, 10, 10)
+        # A floating card takes its inset from the stylesheet
+        inset = 0 if self.config.audio_menu.anchor == "bar" else 10
+        layout.setContentsMargins(inset, inset, inset, inset)
 
         # Create a container widget and layout
         self.container = QWidget()
@@ -576,12 +577,11 @@ class VolumeWidget(BaseWidget):
         menu = self.config.audio_menu
         speakers = self._service.get_speakers()
         device_name = (dict(self.devices).get(speakers.id) if speakers else None) or ""
+        layout.setSpacing(4)
 
         master = FillSlider(menu.device_icon, device_name)
         master.setProperty("class", "volume-slider fill-slider")
         self._apply_slider_scroll_step(master)
-        if self.config.tooltip and device_name:
-            set_tooltip(master, device_name, delay=800, position="top")
         self.volume_slider = master
         self._update_slider_value()
         master.valueChanged.connect(self._on_slider_value_changed)
@@ -607,7 +607,7 @@ class VolumeWidget(BaseWidget):
         apps = QFrame()
         apps.setProperty("class", "apps-container")
         apps_layout = QVBoxLayout(apps)
-        apps_layout.setSpacing(0)
+        apps_layout.setSpacing(4)
         apps_layout.setContentsMargins(0, 0, 0, 0)
         for session in sessions:
             apps_layout.addWidget(self._app_fill_row(session))

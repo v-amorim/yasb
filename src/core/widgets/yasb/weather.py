@@ -11,6 +11,8 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QMouseEvent, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from core.utils.optical import center_icon_on_text
+from core.utils.tabular import set_tabular
 from core.utils.tooltip import set_tooltip
 from core.utils.utilities import PopupWidget, refresh_widget_style
 from core.validation.widgets.yasb.weather import WeatherWidgetConfig
@@ -396,9 +398,12 @@ class WeatherWidget(BaseWidget):
         now.setProperty("class", "now")
         now_layout = QHBoxLayout(now)
         now_layout.setContentsMargins(0, 0, 0, 0)
+        now_layout.setSpacing(4)
         temp_column = QVBoxLayout()
         temp_column.setSpacing(0)
-        temp_column.addWidget(label(rows["temp"], "now-temp", now))
+        now_temp = label(rows["temp"], "now-temp", now)
+        set_tabular(now_temp)
+        temp_column.addWidget(now_temp)
         temp_column.addWidget(label(rows["condition"], "now-condition", now))
         now_layout.addLayout(temp_column)
         now_layout.addWidget(rule("now-rule", now))
@@ -407,8 +412,11 @@ class WeatherWidget(BaseWidget):
         facts.addStretch(1)
         for name, value in rows["facts"]:
             fact = QHBoxLayout()
+            fact.setSpacing(4)
+            fact_value = label(value, "fact-value", now)
+            set_tabular(fact_value)
             fact.addWidget(label(name, "fact-label", now))
-            fact.addWidget(label(value, "fact-value", now))
+            fact.addWidget(fact_value)
             fact.addStretch(1)
             facts.addLayout(fact)
         facts.addStretch(1)
@@ -422,9 +430,14 @@ class WeatherWidget(BaseWidget):
             row.setProperty("class", "day-row rainy" if day["rainy"] else "day-row")
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(label(day["name"], "day-name", row))
-            row_layout.addWidget(label(day["icon"], "day-icon", row))
+            row_layout.setSpacing(4)
+            day_name = label(day["name"], "day-name", row)
+            day_icon = label(day["icon"], "day-icon", row)
+            row_layout.addWidget(day_name)
+            row_layout.addWidget(day_icon)
+            center_icon_on_text(day_icon, day_name)
             row_layout.addStretch(1)
+            parts: dict[str, QLabel] = {}
             for text, class_name in (
                 (day["low"], "day-low"),
                 ("/", "day-slash"),
@@ -432,7 +445,11 @@ class WeatherWidget(BaseWidget):
                 (RAIN_CHANCE_ICON, "day-drop"),
                 (day["rain"], "day-rain"),
             ):
-                row_layout.addWidget(label(text, class_name, row))
+                parts[class_name] = label(text, class_name, row)
+                if class_name in ("day-low", "day-high", "day-rain"):
+                    set_tabular(parts[class_name])
+                row_layout.addWidget(parts[class_name])
+            center_icon_on_text(parts["day-drop"], parts["day-rain"])
             card.addWidget(row)
         return card
 
@@ -456,6 +473,7 @@ class WeatherWidget(BaseWidget):
         now = QHBoxLayout()
         now.setSpacing(8)
         temp = label(rows["temp"], "chart-temp", body)
+        set_tabular(temp)
         condition = label(rows["condition"], "chart-condition", body)
         # Qt has no baseline alignment: lift the smaller text by the difference of the two descents
         temp.ensurePolished()
@@ -465,12 +483,14 @@ class WeatherWidget(BaseWidget):
         now.addWidget(condition, 0, Qt.AlignmentFlag.AlignBottom)
         now.addStretch(1)
         facts = QHBoxLayout()
-        facts.setSpacing(14)
+        facts.setSpacing(8)
         for name, value in rows["facts"]:
             fact = QVBoxLayout()
             fact.setSpacing(0)
+            fact_value = label(value, "chart-fact-value", body)
+            set_tabular(fact_value)
             fact.addWidget(label(name, "chart-fact-label", body))
-            fact.addWidget(label(value, "chart-fact-value", body))
+            fact.addWidget(fact_value)
             facts.addLayout(fact)
         facts.addStretch(1)
         left = QVBoxLayout()
@@ -496,6 +516,7 @@ class WeatherWidget(BaseWidget):
             tile = QFrame(body)
             tile.setProperty("class", "tile rainy" if rainy else "tile")
             column = QVBoxLayout(tile)
+            column.setContentsMargins(0, 0, 0, 0)
             column.setSpacing(0)
             for text, class_name in ((day["name"], "tile-name"), (day["icon"], "tile-icon")):
                 column.addWidget(label(text, class_name, tile), 0, Qt.AlignmentFlag.AlignHCenter)
@@ -503,14 +524,21 @@ class WeatherWidget(BaseWidget):
             temps.setSpacing(0)
             temps.addStretch(1)
             for text, class_name in ((day["low"], "tile-low"), (" / ", "tile-slash"), (day["high"], "tile-high")):
-                temps.addWidget(label(text, class_name, tile))
+                temp_label = label(text, class_name, tile)
+                if class_name != "tile-slash":
+                    set_tabular(temp_label)
+                temps.addWidget(temp_label)
             temps.addStretch(1)
             column.addLayout(temps)
             rain = QHBoxLayout()
             rain.setSpacing(0)
             rain.addStretch(1)
-            for text, class_name in ((RAIN_CHANCE_ICON, "tile-drop"), (f" {day['rain']}", "tile-rain")):
-                rain.addWidget(label(text, class_name, tile))
+            drop_label = label(RAIN_CHANCE_ICON, "tile-drop", tile)
+            rain_label = label(f" {day['rain']}", "tile-rain", tile)
+            set_tabular(rain_label)
+            rain.addWidget(drop_label)
+            rain.addWidget(rain_label)
+            center_icon_on_text(drop_label, rain_label)
             rain.addStretch(1)
             column.addLayout(rain)
             tiles.addWidget(tile, 1)
@@ -747,7 +775,7 @@ class WeatherWidget(BaseWidget):
                 else None,
             }
             self._card_rows = {
-                "temp": self._degrees(current.temp_f, current.temp_c),
+                "temp": self._format_temp(current.temp_f, current.temp_c),
                 "condition": weather_text,
                 "facts": [
                     ("Feels", self._degrees(current.feelslike_f, current.feelslike_c)),

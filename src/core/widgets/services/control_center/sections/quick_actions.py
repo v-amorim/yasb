@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from core.utils.optical import center_icon_on_text
 from core.utils.shell_utils import shell_open
 from core.utils.tooltip import CustomToolTip, set_tooltip
 from core.utils.utilities import ElidedLabel
@@ -75,8 +76,8 @@ class QuickActionsSectionWidget(QFrame):
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(0)
-        grid.setVerticalSpacing(0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
 
         columns = config.columns
         for i in range(columns):
@@ -113,6 +114,7 @@ class QuickActionsSectionWidget(QFrame):
         if inline:
             button_layout.addWidget(icon_label, alignment=align)
             button_layout.addWidget(text_label, alignment=align)
+            center_icon_on_text(icon_label, text_label)
         else:
             button_layout.addWidget(icon_label)
             button_layout.addWidget(text_label)

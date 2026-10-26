@@ -6,6 +6,9 @@ from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QMouseEvent, QPainter, QPainterPath, QPaintEvent, QPalette
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSlider, QWidget
 
+from core.utils.optical import center_icon_on_text
+from core.utils.tabular import set_tabular
+
 # pyqtProperty exists at runtime but is missing from the PyQt6 type stubs
 pyqtProperty: Callable[..., Any] = getattr(QtCore, "pyqtProperty")
 
@@ -14,6 +17,12 @@ ELIDE_AFTER_CHARS = 24
 
 class _ElidedLabel(QLabel):
     """A label that ends in an ellipsis when the row is too narrow, and never asks for more than ELIDE_AFTER_CHARS."""
+
+    elision_changed = pyqtSignal(bool)
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self._elided = False
 
     @override
     def sizeHint(self) -> QSize:
@@ -28,6 +37,10 @@ class _ElidedLabel(QLabel):
     def paintEvent(self, a0: QPaintEvent | None) -> None:
         rect = self.contentsRect()
         text = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, rect.width())
+        elided = text != self.text()
+        if elided != self._elided:
+            self._elided = elided
+            self.elision_changed.emit(elided)
         style = self.style()
         if style is None:
             return
@@ -50,7 +63,7 @@ class FillSlider(QSlider):
 
     def __init__(self, icon: str, name: str, parent: QWidget | None = None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
-        self._radius = 8
+        self._radius = 4
         self.setRange(0, 100)
         self.setMinimumHeight(28)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -61,8 +74,11 @@ class FillSlider(QSlider):
         self._icon = self._add_label(layout, QLabel(icon, self), "icon")
         self._icon.setVisible(bool(icon))
         self._name = self._add_label(layout, _ElidedLabel(name, self), "label")
+        self._name.elision_changed.connect(self._show_full_name)
+        center_icon_on_text(self._icon, self._name)
         layout.setStretchFactor(self._name, 1)
         self._value = self._add_label(layout, QLabel("", self), "value")
+        set_tabular(self._value)
         self._show_value(self.value())
 
     @override
@@ -82,17 +98,21 @@ class FillSlider(QSlider):
         layout.addWidget(label)
         return label
 
+    def _show_full_name(self, elided: bool) -> None:
+        self.setToolTip(self._name.text() if elided else "")
+
     def _show_value(self, value: int) -> None:
         self._value.setText(f"{value}%")
 
-    def _get_radius(self) -> int:
-        return self._radius
+    def _get_radius(self) -> str:
+        return f"{self._radius}px"
 
-    def _set_radius(self, radius: int) -> None:
-        self._radius = radius
+    # A string so the stylesheet can pass the --radius-tile token, whose value ends in px
+    def _set_radius(self, radius: str) -> None:
+        self._radius = int(str(radius).removesuffix("px"))
         self.update()
 
-    radius: int = pyqtProperty(int, _get_radius, _set_radius)
+    radius: str = pyqtProperty(str, _get_radius, _set_radius)
 
     def _value_at(self, x: float) -> int:
         ratio = max(0.0, min(1.0, x / self.width())) if self.width() > 0 else 0.0

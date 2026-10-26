@@ -106,7 +106,7 @@ def test_rows_layout_shows_the_now_header(make_widget: MakeWidget):
     widget = make_widget(layout="rows")
     widget._popup_card()
 
-    assert _texts(widget.dialog, "now-temp") == ["19°"]
+    assert _texts(widget.dialog, "now-temp") == ["19°C"]
     assert _texts(widget.dialog, "now-condition") == ["Rainy"]
     assert _texts(widget.dialog, "fact-label") == ["Feels", "Humidity", "Rain"]
     assert _texts(widget.dialog, "fact-value") == ["21°", "94%", "92%"]
@@ -152,7 +152,7 @@ def test_chart_layout_shows_now_chart_and_day_tiles(make_widget: MakeWidget):
     widget.process_weather_data(_hourly_api_data())
     widget._popup_card()
 
-    assert _texts(widget.dialog, "chart-temp") == ["19°"]
+    assert _texts(widget.dialog, "chart-temp") == ["19°C"]
     assert _texts(widget.dialog, "chart-condition") == ["Rainy"]
     assert _texts(widget.dialog, "chart-fact-label") == ["Feels", "Humidity", "Rain"]
     assert _texts(widget.dialog, "chart-fact-value") == ["21°", "94%", "92%"]

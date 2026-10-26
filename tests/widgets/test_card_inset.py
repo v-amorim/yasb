@@ -51,10 +51,10 @@ SURFACE_INSET = 10
 TOLERANCE = 0.5
 
 PRESETS = [
-    {"name": "Night coding", "icon": "N", "brightness": 15, "contrast": 40},
-    {"name": "Reading", "icon": "R", "brightness": 40},
-    {"name": "Movie", "icon": "M", "brightness": 25},
-    {"name": "Sunny day", "icon": "S", "brightness": 90},
+    {"name": "Night coding", "icon": "", "brightness": 15, "contrast": 40},
+    {"name": "Reading", "icon": "", "brightness": 40},
+    {"name": "Movie", "icon": "", "brightness": 25},
+    {"name": "Sunny day", "icon": "", "brightness": 90},
 ]
 
 type Card = tuple[QWidget, QWidget | None]
@@ -254,7 +254,9 @@ def tray(host: QWidget) -> Iterator[Card]:
 
 
 @pytest.fixture
-def brightness_card(host: QWidget, monkeypatch: pytest.MonkeyPatch) -> Iterator[BrightnessWidget]:
+def brightness_card(
+    host: QWidget, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[BrightnessWidget]:
     service = _FakeBrightness()
     monkeypatch.setattr(brightness.BrightnessService, "instance", lambda *args: service)
     monkeypatch.setattr(brightness, "get_widget_monitor_hwnd", lambda widget: 1)
@@ -262,7 +264,11 @@ def brightness_card(host: QWidget, monkeypatch: pytest.MonkeyPatch) -> Iterator[
     widget = BrightnessWidget(BrightnessConfig.model_validate({"tooltip": False, "brightness_menu": menu}))
     widget.setParent(host)
     widget._show_brightness_menu()
-    _settle(widget.dialog)
+    if getattr(request, "param", "settled") == "settled":
+        _settle(widget.dialog)
+    else:
+        for _ in range(3):
+            QApplication.processEvents()
     yield widget
     widget.dialog.close()
     widget.deleteLater()
@@ -368,6 +374,19 @@ def test_surface_inset_brightness_fill_slider(brightness_card: BrightnessWidget)
     assert len(sliders) == 2
     for slider in sliders:
         _assert_surface_inset(slider)
+
+
+@pytest.mark.parametrize("brightness_card", ["as opened live"], indirect=True)
+def test_brightness_preset_text_is_never_cut(brightness_card: BrightnessWidget):
+    # On its first open the card was sized before the stylesheet fonts reached its labels, so it came out too narrow.
+    dialog = brightness_card.dialog
+    assert dialog.width() >= dialog.sizeHint().width(), (dialog.width(), dialog.sizeHint().width())
+    cut = [
+        (label.text(), label.width(), label.sizeHint().width())
+        for label in dialog.findChildren(QLabel)
+        if label.property("class") in ("name", "level") and label.width() < label.sizeHint().width()
+    ]
+    assert not cut, cut
 
 
 def test_surface_inset_brightness_preset_tile(brightness_card: BrightnessWidget):

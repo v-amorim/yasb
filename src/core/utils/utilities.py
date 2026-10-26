@@ -298,6 +298,12 @@ class PopupWidget(QWidget):
 
     @override
     def adjustSize(self) -> None:
+        # Before the first show Qt has neither styled the children nor run their layouts, so the card measures too narrow
+        self.ensurePolished()
+        for child in self.findChildren(QWidget):
+            child.ensurePolished()
+            if (child_layout := child.layout()) is not None:
+                child_layout.activate()
         self._apply_card_inset()
         super().adjustSize()
 

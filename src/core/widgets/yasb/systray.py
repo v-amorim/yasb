@@ -14,7 +14,6 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
-    QFrame,
     QHBoxLayout,
     QLayout,
     QMenu,
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.bar_helper import AppBarManager
+from core.utils.ink_balance import InkBalancedFrame
 from core.utils.system import app_data_path
 from core.utils.utilities import refresh_widget_style
 from core.utils.win32.bindings.user32 import IsWindow, RegisterWindowMessage, SendNotifyMessage
@@ -156,7 +156,7 @@ class SystrayWidget(BaseWidget):
         self.widget_container_layout.setSpacing(0)
         self.widget_container_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.widget_container = QFrame(self)
+        self.widget_container = InkBalancedFrame()
         self.widget_container.setLayout(self.widget_container_layout)
         self.widget_container.setProperty("class", "widget-container")
 

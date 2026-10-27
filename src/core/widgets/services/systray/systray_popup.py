@@ -8,6 +8,7 @@ from core.utils.floating_popup import Floating, fade_ms
 from core.utils.focus_ring import attach_focus_ring
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
+from core.utils.utilities import PopupWidget, refresh_widget_style
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
 from core.utils.win32.bindings.user32 import GetAsyncKeyState
 from core.validation.widgets.yasb.systray import SystrayPopupConfig
@@ -84,6 +85,15 @@ class SystrayPopup(QWidget):
         self._watch_timer.timeout.connect(self._on_watch_tick)
 
         self.closed.connect(self._on_popup_closed)
+        toggle_btn.toggled.connect(self._mark_slot_open)
+
+    def _mark_slot_open(self, is_open: bool) -> None:
+        """Give the toggle button's slot the popup-open class, as PopupWidget gives other bar items."""
+        slot = self._toggle_btn.parentWidget()
+        if slot is None or not is_valid_qobject(slot):
+            return
+        PopupWidget._set_popup_open_class(slot, is_open)
+        refresh_widget_style(self._toggle_btn)
 
     @property
     def grid_widget(self) -> DropWidget:

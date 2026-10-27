@@ -163,6 +163,22 @@ def test_widget_anchored_popup_leaves_the_bar_alone(qapp: QApplication) -> None:
     window.deleteLater()
 
 
+def test_the_toggle_buttons_slot_looks_open_while_the_tray_card_shows(qapp: QApplication) -> None:
+    window, _, popup = _bar_tray(qapp)
+    popup._toggle_btn.setCheckable(True)
+    slot = popup._toggle_btn.parentWidget()
+    assert slot is not None
+    slot.setProperty("class", "widget-container")
+
+    popup.open("")
+    assert slot.property("class") == "widget-container popup-open"
+
+    popup.hide_animated()
+    assert slot.property("class") == "widget-container"
+    popup.hide()
+    window.deleteLater()
+
+
 def _tile(name: str) -> IconWidget:
     icon = IconWidget()
     icon.data = IconData(hIcon=1, szTip=name, exe="app")

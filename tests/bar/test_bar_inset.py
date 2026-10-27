@@ -226,14 +226,61 @@ def test_pill_corner_pill_groups_are_8(bar: Bar):
         _assert_radius(group, PILL_RADIUS, PILL_RADIUS + 2)
 
 
-def test_pill_corner_widget_slots_are_8(bar: Bar):
+CHIP_RADIUS = 4
+CHIP_GAP = 3
+# The open fill (surface-4) and the slot border painted in the pill's colour (surface-2)
+CHIP_FILL = (0x2F, 0x36, 0x54)
+CHIP_EDGE = (0x1C, 0x20, 0x33)
+
+
+def _chip_alpha(slot: QWidget) -> tuple[bytes, int, int]:
+    """How much of each pixel is the chip's fill rather than the border around it, as an alpha plane."""
+    image = QImage(slot.size(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    slot.render(image, QPoint(), QRegion(), QWidget.RenderFlag(0))
+    span = CHIP_FILL[2] - CHIP_EDGE[2]
+    alpha = bytearray()
+    for y in range(image.height()):
+        for x in range(image.width()):
+            colour = image.pixelColor(x, y)
+            share = (colour.blue() - CHIP_EDGE[2]) / span if colour.alpha() == 255 else 0
+            alpha.append(round(255 * min(max(share, 0), 1)))
+    return bytes(alpha), image.width(), image.height()
+
+
+def _chip_differs_from_radius(chip: tuple[bytes, int, int], radius: int) -> bool:
+    alpha, width, height = chip
+    reference = QFrame()
+    reference.setStyleSheet(f"QFrame {{ background-color: #FFFFFF; border-radius: {radius}px; }}")
+    reference.resize(width - 2 * CHIP_GAP, height - 2 * CHIP_GAP)
+    size = CHIP_RADIUS + 2
+    ours = _corner_windows(alpha, width, height, size, False)
+    theirs = _corner_windows(*_corner_alpha(reference, QWidget.RenderFlag(0)), size, False)
+    return any(abs(a - b) > 32 for w1, w2 in zip(ours, theirs, strict=True) for a, b in zip(w1, w2, strict=True))
+
+
+def test_pill_corner_open_slot_is_a_4px_chip_3px_inside(bar: Bar):
     bottom = bar._bottom_row
     assert bottom is not None
     slots = [c for c in bottom.findChildren(QFrame) if c.property("class") == "widget-container" and c.isVisible()]
     assert len(slots) == 6
     for slot in slots:
+        pill = slot.parentWidget()
+        while pill is not None and pill.property("class") != "container":
+            pill = pill.parentWidget()
+        assert pill is not None
+        # A slot taller than its pill is clipped there, so the chip's bottom gap disappears
+        top = slot.mapTo(pill, QPoint(0, 0)).y()
+        assert top >= 0 and top + slot.height() <= pill.height()
         _marked_open(slot)
-        _assert_radius(slot, PILL_RADIUS, PILL_RADIUS + 2)
+        chip = _chip_alpha(slot)
+        alpha, width, height = chip
+        rows = [y for y in range(height) if any(alpha[y * width : (y + 1) * width])]
+        columns = [x for x in range(width) if any(alpha[x::width])]
+        assert (columns[0], rows[0]) == (CHIP_GAP, CHIP_GAP)
+        assert (width - 1 - columns[-1], height - 1 - rows[-1]) == (CHIP_GAP, CHIP_GAP)
+        assert not _chip_differs_from_radius(chip, CHIP_RADIUS)
+        assert _chip_differs_from_radius(chip, CHIP_RADIUS + 4)
 
 
 def test_pill_corner_date_pill_is_8(bar: Bar):

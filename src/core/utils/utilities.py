@@ -43,6 +43,7 @@ from winrt.windows.data.xml.dom import XmlDocument
 from winrt.windows.ui.notifications import ToastNotification, ToastNotificationManager
 
 from core.utils.floating_popup import Floating, fade_ms
+from core.utils.focus_ring import attach_focus_ring
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
@@ -207,6 +208,7 @@ class PopupWidget(QWidget):
         self._drag_pos = None
         # Create the inner frame
         self._popup_content = QFrame(self)
+        attach_focus_ring(self)
 
         self._fade_animation = QPropertyAnimation(self, b"windowOpacity")
         self._fade_base_ms = animation

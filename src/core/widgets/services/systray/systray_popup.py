@@ -5,6 +5,7 @@ from PyQt6.QtGui import QCloseEvent, QCursor, QHideEvent, QResizeEvent, QShowEve
 from PyQt6.QtWidgets import QApplication, QFrame, QPushButton, QVBoxLayout, QWidget
 
 from core.utils.floating_popup import Floating, fade_ms
+from core.utils.focus_ring import attach_focus_ring
 from core.utils.qobject import is_valid_qobject
 from core.utils.system import is_windows_10
 from core.utils.win32.backdrop import disable_round_corners, enable_blur, enable_round_corners
@@ -56,6 +57,7 @@ class SystrayPopup(QWidget):
 
         # Inner frame for styling
         self._popup_content = QFrame(self)
+        attach_focus_ring(self)
 
         # Grid drop container
         self._grid_widget = DropWidget(grid_cols=icons_per_row)
